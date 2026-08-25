@@ -4,6 +4,8 @@
 #   docker compose up -d redis          # Phase 2
 #   docker compose up -d redis kong     # Phase 3
 #
+# Kong reaches the Java services on the host via host.docker.internal.
+#
 # PostgreSQL is deliberately NOT here - it runs in Postgres.app and already
 # holds the inventory_mgmt data from the database project.
 # ============================================================================
@@ -21,6 +23,39 @@ services:
       retries: 5
     volumes:
       - redis-data:/data
+
+  # --------------------------------------------------------------------------
+  # Kong in DB-less mode: the entire config comes from phase3-gateway/kong.yml.
+  #   8000 = proxy (where consumers send traffic)
+  #   8001 = admin API + /metrics (read-only here; config comes from the file)
+  # --------------------------------------------------------------------------
+  kong:
+    image: kong:3.9
+    container_name: iap-kong
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_PLUGINS: "bundled"
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    volumes:
+      - ./phase3-gateway/kong.yml:/kong/kong.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   redis-data:

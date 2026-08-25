@@ -1,0 +1,149 @@
+# ============================================================================
+# kong.yml  -  DECLARATIVE (DB-less) Kong configuration.
+#
+# Everything Kong knows lives in this file: services, routes, plugins,
+# consumers, credentials. No admin-UI clicking, no database, no drift between
+# environments - the gateway config is reviewed and version-controlled exactly
+# like application code.
+#
+# That is the real lesson of this phase. Most gateway tutorials have you POST
+# to the Admin API and end up with a configuration nobody can reproduce.
+# ============================================================================
+
+_format_version: "3.0"
+_transform: true
+
+# ----------------------------------------------------------------------------
+# UPSTREAM SERVICES
+#
+# host.docker.internal is how a container reaches a process on the Mac host.
+# In production these would be Kubernetes service names or real hostnames.
+# ----------------------------------------------------------------------------
+services:
+
+  # --- The REST facade from Phase 2 -----------------------------------------
+  - name: rest-facade
+    url: http://host.docker.internal:8082
+    retries: 3
+    connect_timeout: 5000
+    read_timeout: 10000
+    routes:
+      - name: rest-api
+        paths:
+          - /api
+        strip_path: false          # upstream already expects /api/v1/...
+        methods: [GET, POST, DELETE, OPTIONS]
+
+  # --- The SOAP service from Phase 1 ----------------------------------------
+  # A gateway is not "the REST gateway" - it fronts whatever speaks HTTP.
+  # Putting the legacy SOAP endpoint behind the SAME gateway means auth,
+  # rate limiting and observability apply uniformly to old and new consumers.
+  - name: soap-service
+    url: http://host.docker.internal:8081
+    retries: 3
+    routes:
+      - name: soap-endpoint
+        paths:
+          - /soap
+        strip_path: true           # /soap/ws  ->  upstream /ws
+        methods: [POST, GET]
+
+# ----------------------------------------------------------------------------
+# CONSUMERS  -  who is allowed to call, and who gets which quota.
+# ----------------------------------------------------------------------------
+consumers:
+  - username: mobile-app
+    keyauth_credentials:
+      - key: mobile-secret-key-001
+
+  - username: partner-integration
+    keyauth_credentials:
+      - key: partner-secret-key-002
+
+  - username: internal-dashboard
+    keyauth_credentials:
+      - key: internal-secret-key-003
+
+# ----------------------------------------------------------------------------
+# GLOBAL PLUGINS  -  apply to every service and route.
+# ----------------------------------------------------------------------------
+plugins:
+
+  # --- Distributed tracing ID -----------------------------------------------
+  # Generates X-Correlation-ID if the caller did not send one, and passes it
+  # upstream. One ID now spans gateway -> REST -> SOAP -> Postgres, which is
+  # what makes a request traceable across four processes.
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid#counter
+      echo_downstream: true
+
+  # --- Prometheus metrics ---------------------------------------------------
+  # Scrape at http://localhost:8001/metrics
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+
+# ----------------------------------------------------------------------------
+# PER-SERVICE / PER-ROUTE PLUGINS
+# ----------------------------------------------------------------------------
+# NOTE: these are attached by name via the `service:` key below, which is why
+# they appear here rather than nested under the service definitions.
+
+  # --- Authentication on the REST API ---------------------------------------
+  # Callers must send:  apikey: <their key>
+  # Without it Kong returns 401 and the request never reaches your service -
+  # your application code contains ZERO authentication logic.
+  - name: key-auth
+    service: rest-facade
+    config:
+      key_names: [apikey]
+      hide_credentials: true      # strip the key before forwarding upstream
+
+  # --- Rate limiting, backed by the SAME Redis as Phase 2 -------------------
+  # policy: redis is what makes the limit correct across MULTIPLE Kong nodes.
+  # With policy: local, each node would keep its own counter and a 3-node
+  # cluster would effectively allow 3x the intended limit.
+  - name: rate-limiting
+    service: rest-facade
+    config:
+      minute: 20
+      policy: redis
+      redis:
+        host: redis
+        port: 6379
+        database: 1               # keep gateway counters out of the app's keyspace
+      fault_tolerant: true        # if Redis dies, allow traffic rather than block it
+      hide_client_headers: false  # send X-RateLimit-* back to the caller
+
+  # --- Response header hygiene ----------------------------------------------
+  # Strip anything that leaks internal implementation detail, and stamp the
+  # response so you can prove it came through the gateway.
+  - name: response-transformer
+    service: rest-facade
+    config:
+      remove:
+        headers: [Server, X-Application-Context]
+      add:
+        headers:
+          - "X-Gateway: kong"
+          - "X-Served-By: integration-platform"
+
+  # --- SOAP route: rate limit only, no key-auth -----------------------------
+  # Deliberate asymmetry. Legacy SOAP consumers cannot be asked to add an API
+  # key overnight, so they get throttling and observability now, and
+  # authentication later once they have migrated. Meeting existing consumers
+  # where they are - rather than breaking them - is most of what gateway work
+  # actually is.
+  - name: rate-limiting
+    service: soap-service
+    config:
+      minute: 30
+      policy: redis
+      redis:
+        host: redis
+        port: 6379
+        database: 1
+      fault_tolerant: true
