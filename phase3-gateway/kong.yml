@@ -125,11 +125,17 @@ plugins:
     service: rest-facade
     config:
       remove:
+        # This strips the UPSTREAM's Server header (Tomcat). Kong then adds
+        # its own "Server: kong/3.9.x" afterwards, which a plugin cannot
+        # remove - that needs the KONG_HEADERS directive in docker-compose.
         headers: [Server, X-Application-Context]
       add:
         headers:
-          - "X-Gateway: kong"
-          - "X-Served-By: integration-platform"
+          # NO space after the colon. Kong treats everything after ":" as the
+          # value, so "X-Gateway: kong" produces the value " kong" with a
+          # leading space. Easy to miss, and it breaks exact-match consumers.
+          - "X-Gateway:kong"
+          - "X-Served-By:integration-platform"
 
   # --- SOAP route: rate limit only, no key-auth -----------------------------
   # Deliberate asymmetry. Legacy SOAP consumers cannot be asked to add an API

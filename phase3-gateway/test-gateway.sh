@@ -5,6 +5,15 @@
 #   ./test-gateway.sh
 #
 # Requires: Kong on :8000, REST facade on :8082, SOAP service on :8081.
+#
+# NOTE ON RE-RUNS: section 5 deliberately burns through the rate limit, and
+# Kong's window is a fixed 60 seconds. Running this suite twice inside the
+# same minute can therefore make a later assertion fail on quota it did not
+# spend itself. Wait ~60s between runs, or give each run its own consumer.
+#
+# This is a real property of testing rate-limited systems, not a flaw to
+# paper over: tests that mutate shared, time-windowed state are not
+# independent, and pretending otherwise produces flaky suites.
 # ============================================================================
 set -uo pipefail
 
@@ -40,9 +49,13 @@ echo "  Your application code contains no auth logic at all - Kong did this."
 # ---------------------------------------------------------------------------
 head "3. RESPONSE TRANSFORMATION - headers added and stripped"
 HDRS=$(curl -s -D- -o /dev/null -H "apikey: $KEY" $PROXY/api/v1/products/ELEC-LAP-001)
-echo "$HDRS" | grep -qi 'X-Gateway: kong'  && pass "X-Gateway header injected"  || fail "X-Gateway missing"
-echo "$HDRS" | grep -qi 'X-Served-By'      && pass "X-Served-By header injected" || fail "X-Served-By missing"
-echo "$HDRS" | grep -qi '^Server:'         && fail "Server header leaked"        || pass "Server header stripped"
+# Assert the exact VALUE, not just presence: Kong keeps whatever follows the
+# colon, so a config of "X-Gateway: kong" silently yields " kong".
+GW=$(echo "$HDRS" | tr -d '\r' | grep -i '^X-Gateway:' | cut -d' ' -f2-)
+check "X-Gateway value is exactly 'kong'" "$GW" "kong"
+echo "$HDRS" | grep -qi 'X-Served-By'   && pass "X-Served-By header injected" || fail "X-Served-By missing"
+# Kong stamps its OWN Server/Via after plugins run; only KONG_HEADERS removes them.
+echo "$HDRS" | tr -d '\r' | grep -qiE '^(Server|Via):' && fail "Kong version disclosed via Server/Via" || pass "no version disclosure (KONG_HEADERS)"
 
 # ---------------------------------------------------------------------------
 head "4. CORRELATION ID - one trace across every hop"

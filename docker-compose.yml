@@ -44,6 +44,11 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_PLUGINS: "bundled"
+      # Drop server_tokens so Kong stops advertising "Server: kong/3.9.3" and
+      # "Via: kong/3.9.3". Version disclosure tells an attacker exactly which
+      # CVEs to try. Keep the latency + request-id headers, which are useful
+      # for debugging and carry no version information.
+      KONG_HEADERS: "latency_tokens,X-Kong-Request-Id"
     ports:
       - "8000:8000"
       - "8001:8001"

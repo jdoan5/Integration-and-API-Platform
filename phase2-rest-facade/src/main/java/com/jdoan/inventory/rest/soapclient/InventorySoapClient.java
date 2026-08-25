@@ -25,7 +25,7 @@ public class InventorySoapClient {
     public ProductType getProduct(String sku) {
         GetProductRequest request = new GetProductRequest();
         request.setSku(sku);
-        GetProductResponse response = (GetProductResponse) ws.marshalSendAndReceive(request);
+        GetProductResponse response = (GetProductResponse) ws.marshalSendAndReceive(request, CorrelationIdPropagator.propagate());
         return response.getProduct();
     }
 
@@ -33,7 +33,7 @@ public class InventorySoapClient {
         GetStockLevelRequest request = new GetStockLevelRequest();
         request.setSku(sku);
         request.setWarehouseCode(warehouseCode);   // null = all warehouses
-        GetStockLevelResponse response = (GetStockLevelResponse) ws.marshalSendAndReceive(request);
+        GetStockLevelResponse response = (GetStockLevelResponse) ws.marshalSendAndReceive(request, CorrelationIdPropagator.propagate());
         return response.getStockLevel();
     }
 
@@ -41,7 +41,7 @@ public class InventorySoapClient {
         ListLowStockRequest request = new ListLowStockRequest();
         request.setWarehouseCode(warehouseCode);
         request.setMaxResults(maxResults);
-        return (ListLowStockResponse) ws.marshalSendAndReceive(request);
+        return (ListLowStockResponse) ws.marshalSendAndReceive(request, CorrelationIdPropagator.propagate());
     }
 
     public RecordStockMovementResponse recordMovement(String sku, String warehouseCode,
@@ -54,7 +54,7 @@ public class InventorySoapClient {
         request.setQuantity(quantity);
         request.setReferenceType(referenceType);
         request.setNotes(notes);
-        return (RecordStockMovementResponse) ws.marshalSendAndReceive(request);
+        return (RecordStockMovementResponse) ws.marshalSendAndReceive(request, CorrelationIdPropagator.propagate());
     }
 
 }
