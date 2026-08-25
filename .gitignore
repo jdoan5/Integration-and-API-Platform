@@ -1,6 +1,26 @@
+# --- build output -----------------------------------------------------------
 target/
 !.mvn/wrapper/maven-wrapper.jar
+
+# --- secrets: never commit these -------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+credentials.json
+
+# --- local noise ------------------------------------------------------------
 .DS_Store
 *.log
+logs/
+
+# --- IDE --------------------------------------------------------------------
 .idea/
 *.iml
+.vscode/
+*.iws
+*.ipr

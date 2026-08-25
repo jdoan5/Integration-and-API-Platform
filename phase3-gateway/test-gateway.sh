@@ -19,7 +19,7 @@ set -uo pipefail
 
 PROXY=http://localhost:8000
 ADMIN=http://localhost:8001
-KEY=mobile-secret-key-001
+KEY=local-demo-key-mobile
 
 pass() { printf '  \033[32mPASS\033[0m %s\n' "$1"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; }
@@ -79,7 +79,7 @@ echo "$CODES" | grep -q '429' && pass "limit enforced (429s returned)" || fail "
 
 echo "  --- a DIFFERENT consumer has its own quota ---"
 check "partner key still allowed" \
-      "$(curl -s -o /dev/null -w '%{http_code}' -H 'apikey: partner-secret-key-002' $PROXY/api/v1/products/ELEC-LAP-001)" "200"
+      "$(curl -s -o /dev/null -w '%{http_code}' -H 'apikey: local-demo-key-partner' $PROXY/api/v1/products/ELEC-LAP-001)" "200"
 echo "  Kong rate-limits per CONSUMER, not per IP - that is why identity comes first."
 
 # ---------------------------------------------------------------------------

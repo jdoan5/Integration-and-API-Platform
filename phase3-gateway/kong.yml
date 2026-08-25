@@ -50,19 +50,29 @@ services:
 
 # ----------------------------------------------------------------------------
 # CONSUMERS  -  who is allowed to call, and who gets which quota.
+#
+# !! THESE ARE LOCAL DEMO CREDENTIALS. !!
+# They are committed on purpose so the project runs with one command, and they
+# grant access to nothing but a laptop. NEVER commit real API keys.
+#
+# In production Kong reads secrets from a vault rather than the config file:
+#     key: "{vault://env/MOBILE_API_KEY}"
+# with the value supplied by the environment, HashiCorp Vault, AWS Secrets
+# Manager, or GCP Secret Manager. The declarative file then contains a
+# reference, not the secret itself.
 # ----------------------------------------------------------------------------
 consumers:
   - username: mobile-app
     keyauth_credentials:
-      - key: mobile-secret-key-001
+      - key: local-demo-key-mobile
 
   - username: partner-integration
     keyauth_credentials:
-      - key: partner-secret-key-002
+      - key: local-demo-key-partner
 
   - username: internal-dashboard
     keyauth_credentials:
-      - key: internal-secret-key-003
+      - key: local-demo-key-internal
 
 # ----------------------------------------------------------------------------
 # GLOBAL PLUGINS  -  apply to every service and route.

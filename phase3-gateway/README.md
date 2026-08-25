@@ -79,13 +79,13 @@ curl -i http://localhost:8000/api/v1/products/ELEC-LAP-001
 That returns **401** — no API key. Now with one:
 
 ```bash
-curl -s -H "apikey: mobile-secret-key-001" http://localhost:8000/api/v1/products/ELEC-LAP-001 | python3 -m json.tool
+curl -s -H "apikey: local-demo-key-mobile" http://localhost:8000/api/v1/products/ELEC-LAP-001 | python3 -m json.tool
 ```
 
 Watch the rate limit engage (20/min for this consumer):
 
 ```bash
-for i in $(seq 1 25); do curl -s -o /dev/null -w "%{http_code} " -H "apikey: mobile-secret-key-001" http://localhost:8000/api/v1/products/ELEC-LAP-001; done; echo
+for i in $(seq 1 25); do curl -s -o /dev/null -w "%{http_code} " -H "apikey: local-demo-key-mobile" http://localhost:8000/api/v1/products/ELEC-LAP-001; done; echo
 ```
 
 Prometheus metrics:
