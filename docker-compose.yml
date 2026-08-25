@@ -1,0 +1,26 @@
+# ============================================================================
+# Shared infrastructure for the platform.
+#
+#   docker compose up -d redis          # Phase 2
+#   docker compose up -d redis kong     # Phase 3
+#
+# PostgreSQL is deliberately NOT here - it runs in Postgres.app and already
+# holds the inventory_mgmt data from the database project.
+# ============================================================================
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: iap-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

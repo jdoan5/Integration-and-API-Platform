@@ -1,0 +1,243 @@
+openapi: 3.0.3
+
+# ============================================================================
+# THE REST CONTRACT - hand-written first, exactly like the XSD in Phase 1.
+#
+# Compare the two styles deliberately; that comparison is the lesson:
+#
+#   WSDL/XSD                      OpenAPI
+#   --------------------------    -------------------------------------
+#   Operations (verbs)            Resources + HTTP methods
+#   One endpoint, dispatch on     Many paths, dispatch on URL + method
+#     payload element name
+#   xs:pattern / xs:enumeration   pattern / enum  (same idea, different syntax)
+#   SOAP Fault + typed detail     HTTP status codes + a Problem body
+#   Schema validation is          Validation is opt-in; frameworks vary
+#     mandatory in the runtime
+#   Versioning via namespace      Versioning via URL path or header
+#
+# Neither is "better". SOAP puts more guarantees in the runtime at the cost of
+# ceremony; REST is lighter but pushes rigor onto you. Knowing WHY each choice
+# exists is what makes you useful on an integration team.
+# ============================================================================
+
+info:
+  title: Inventory REST Facade
+  version: 1.0.0
+  description: |
+    REST facade over the contract-first SOAP inventory service.
+
+    Implements the strangler-fig pattern: new consumers use this JSON API while
+    the SOAP contract continues serving existing integrations unchanged.
+
+servers:
+  - url: http://localhost:8082
+    description: Local development
+
+paths:
+  /api/v1/products/{sku}:
+    get:
+      summary: Fetch a product by SKU
+      description: Cached in Redis for 5 minutes (product data changes rarely).
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '[A-Z]{3,4}-[A-Z0-9]{3,5}-?[0-9]{0,5}'
+          example: ELEC-LAP-001
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: The product
+          headers:
+            X-RateLimit-Limit:     { schema: { type: integer } }
+            X-RateLimit-Remaining: { schema: { type: integer } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { description: SKU format is invalid }
+        '404': { description: No such product }
+        '429': { description: Rate limit exceeded }
+        '503': { description: Upstream SOAP service unreachable }
+
+  /api/v1/stock/{sku}:
+    get:
+      summary: Stock levels for a SKU
+      description: |
+        Cached for only 30 seconds because stock changes constantly, and
+        invalidated immediately when a movement is recorded.
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema: { type: string }
+        - name: warehouse
+          in: query
+          required: false
+          description: Omit to get every warehouse.
+          schema:
+            type: string
+            pattern: 'WH-[A-Z]{2,4}'
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: One entry per warehouse
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockLevel' }
+        '404': { description: No such product }
+
+  /api/v1/low-stock:
+    get:
+      summary: Items at or below their reorder point
+      description: Never cached - it is a live operational report.
+      parameters:
+        - name: warehouse
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - $ref: '#/components/parameters/ClientId'
+      responses:
+        '200':
+          description: The reorder report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalCount: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LowStockItem' }
+
+  /api/v1/movements:
+    post:
+      summary: Record a stock movement
+      description: |
+        Inserts a row into the stock_movements ledger. The database trigger
+        then updates stock_levels, so the response reports both the before
+        and after quantities.
+
+        Supply an Idempotency-Key to make retries safe: replaying the same key
+        returns the original result instead of recording a second movement.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Any unique string. Results are remembered for 24 hours.
+          schema: { type: string }
+        - $ref: '#/components/parameters/ClientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MovementRequest' }
+      responses:
+        '201':
+          description: Movement recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MovementResult' }
+        '400': { description: Validation failed }
+        '404': { description: Unknown SKU or warehouse }
+        '429': { description: Rate limit exceeded }
+
+  /api/v1/_cache/stats:
+    get:
+      summary: Cache hit/miss statistics
+      responses:
+        '200': { description: Current cache counters }
+
+  /api/v1/_cache:
+    delete:
+      summary: Flush the cache (development aid)
+      responses:
+        '200': { description: Number of keys evicted }
+
+components:
+  parameters:
+    ClientId:
+      name: X-Client-Id
+      in: header
+      required: false
+      description: Identifies the caller for rate limiting. Defaults to "anonymous".
+      schema: { type: string }
+
+  schemas:
+    Product:
+      type: object
+      required: [sku, name, unitPrice, unitCost, reorderPoint, reorderQuantity, active]
+      properties:
+        sku:              { type: string, example: ELEC-LAP-001 }
+        name:             { type: string, example: 'UltraBook 14"' }
+        description:      { type: string, nullable: true }
+        category:         { type: string, nullable: true }
+        unitPrice:        { type: number, format: double, example: 1299.00 }
+        unitCost:         { type: number, format: double, example: 850.00 }
+        reorderPoint:     { type: integer, example: 15 }
+        reorderQuantity:  { type: integer, example: 40 }
+        active:           { type: boolean }
+
+    StockLevel:
+      type: object
+      properties:
+        sku:                 { type: string }
+        productName:         { type: string }
+        warehouseCode:       { type: string, example: WH-EAST }
+        warehouseName:       { type: string }
+        quantity:            { type: integer }
+        reorderPoint:        { type: integer }
+        belowReorderPoint:
+          type: boolean
+          description: Computed by this facade; not present in the SOAP payload.
+
+    LowStockItem:
+      type: object
+      properties:
+        sku:               { type: string }
+        productName:       { type: string }
+        warehouseCode:     { type: string }
+        quantity:          { type: integer }
+        reorderPoint:      { type: integer }
+        deficit:           { type: integer }
+        suggestedOrderQty: { type: integer }
+
+    MovementRequest:
+      type: object
+      required: [sku, warehouseCode, movementType, quantity]
+      properties:
+        sku:
+          type: string
+          pattern: '[A-Z]{3,4}-[A-Z0-9]{3,5}-?[0-9]{0,5}'
+        warehouseCode:
+          type: string
+          pattern: 'WH-[A-Z]{2,4}'
+        movementType:
+          type: string
+          enum: [IN, OUT, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT, RETURN]
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        referenceType: { type: string, nullable: true }
+        notes:         { type: string, nullable: true }
+
+    MovementResult:
+      type: object
+      properties:
+        movementId:     { type: integer, format: int64 }
+        sku:            { type: string }
+        warehouseCode:  { type: string }
+        quantityBefore: { type: integer }
+        quantityAfter:  { type: integer }
+        delta:          { type: integer }
+        recordedAt:     { type: string, format: date-time }
+        replayed:
+          type: boolean
+          description: True when an Idempotency-Key returned a previously stored result.

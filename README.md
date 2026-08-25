@@ -38,7 +38,7 @@ flowchart LR
 | Phase | Focus | Status |
 |---|---|---|
 | [1 — SOAP service](phase1-soap-service/) | SOAP, XSD, service contracts | ✅ Working |
-| 2 — REST facade | Redis caching, rate limiting, strangler-fig migration | Planned |
+| [2 — REST facade](phase2-rest-facade/) | Redis caching, rate limiting, strangler-fig migration | ✅ Working |
 | 3 — API gateway | Kong: auth, rate limiting, transformation | Planned |
 | 4 — Events | Kafka, Schema Registry, schema evolution | Planned |
 
@@ -46,7 +46,13 @@ Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 
 ## Quick start
 
-Phase 1 needs PostgreSQL running with the `inventory_mgmt` database:
+Needs PostgreSQL (Postgres.app) with the `inventory_mgmt` database, plus Redis:
+
+```bash
+docker compose up -d redis
+```
+
+Then start Phase 1 (SOAP, port 8081) and Phase 2 (REST, port 8082):
 
 ```bash
 cd phase1-soap-service && JAVA_HOME=$(/usr/libexec/java_home -v 21) ./mvnw spring-boot:run
