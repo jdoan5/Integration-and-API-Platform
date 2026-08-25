@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The reorder report, served straight off the v_low_stock_items view. -->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:inv="http://jdoan.com/inventory/v1">
+    <soap:Header/>
+    <soap:Body>
+        <inv:ListLowStockRequest>
+            <inv:maxResults>10</inv:maxResults>
+        </inv:ListLowStockRequest>
+    </soap:Body>
+</soap:Envelope>

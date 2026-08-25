@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The write path. Watch quantityBefore vs quantityAfter in the response:
+  they differ by 20 because the DATABASE TRIGGER fired. This service only
+  inserts into stock_movements - it never updates stock_levels.
+-->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:inv="http://jdoan.com/inventory/v1">
+    <soap:Header/>
+    <soap:Body>
+        <inv:RecordStockMovementRequest>
+            <inv:sku>ELEC-AUD-001</inv:sku>
+            <inv:warehouseCode>WH-EAST</inv:warehouseCode>
+            <inv:movementType>IN</inv:movementType>
+            <inv:quantity>20</inv:quantity>
+            <inv:referenceType>MANUAL</inv:referenceType>
+            <inv:notes>Received via SOAP</inv:notes>
+        </inv:RecordStockMovementRequest>
+    </soap:Body>
+</soap:Envelope>

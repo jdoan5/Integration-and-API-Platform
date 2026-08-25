@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Send this with the curl command in the project README.
+  (A double hyphen is illegal inside an XML comment, which is why the
+   curl flags are not repeated here. A small XML rule worth knowing.)
+-->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:inv="http://jdoan.com/inventory/v1">
+    <soap:Header/>
+    <soap:Body>
+        <inv:GetProductRequest>
+            <inv:sku>ELEC-LAP-001</inv:sku>
+        </inv:GetProductRequest>
+    </soap:Body>
+</soap:Envelope>

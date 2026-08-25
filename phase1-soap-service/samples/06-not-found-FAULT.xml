@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Schema-VALID but the SKU doesn't exist. This one reaches the endpoint and
+  produces a structured business fault: look for <inv:InventoryError> inside
+  <detail>, carrying code=PRODUCT_NOT_FOUND and field=sku.
+-->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:inv="http://jdoan.com/inventory/v1">
+    <soap:Header/>
+    <soap:Body>
+        <inv:GetProductRequest>
+            <inv:sku>ELEC-LAP-999</inv:sku>
+        </inv:GetProductRequest>
+    </soap:Body>
+</soap:Envelope>

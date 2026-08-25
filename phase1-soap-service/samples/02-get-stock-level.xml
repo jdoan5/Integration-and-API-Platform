@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Omit <inv:warehouseCode> to get every warehouse; include it for just one. -->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:inv="http://jdoan.com/inventory/v1">
+    <soap:Header/>
+    <soap:Body>
+        <inv:GetStockLevelRequest>
+            <inv:sku>ELEC-AUD-001</inv:sku>
+        </inv:GetStockLevelRequest>
+    </soap:Body>
+</soap:Envelope>

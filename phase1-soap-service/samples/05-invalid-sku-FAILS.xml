@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DELIBERATELY INVALID. 'not-a-valid-sku' breaks the xs:pattern on SkuType.
+  Expect a SOAP Client fault naming cvc-pattern-valid - rejected by the
+  schema validator before any Java code runs.
+-->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:inv="http://jdoan.com/inventory/v1">
+    <soap:Header/>
+    <soap:Body>
+        <inv:GetProductRequest>
+            <inv:sku>not-a-valid-sku</inv:sku>
+        </inv:GetProductRequest>
+    </soap:Body>
+</soap:Envelope>
