@@ -39,8 +39,8 @@ flowchart LR
 |---|---|---|
 | [1 — SOAP service](phase1-soap-service/) | SOAP, XSD, service contracts | ✅ Working |
 | [2 — REST facade](phase2-rest-facade/) | Redis caching, rate limiting, strangler-fig migration | ✅ Working |
-| 3 — API gateway | Kong: auth, rate limiting, transformation | Planned |
-| 4 — Events | Kafka, Schema Registry, schema evolution | Planned |
+| [3 — API gateway](phase3-gateway/) | Kong: auth, rate limiting, transformation | ✅ Working |
+| [4 — Events](phase4-events/) | Kafka, Avro, Schema Registry, transactional outbox | ✅ Working |
 
 Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 
@@ -49,7 +49,7 @@ Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 Needs PostgreSQL (Postgres.app) with the `inventory_mgmt` database, plus Redis:
 
 ```bash
-docker compose up -d redis
+docker compose up -d redis kong kafka schema-registry
 ```
 
 Then start Phase 1 (SOAP, port 8081) and Phase 2 (REST, port 8082):

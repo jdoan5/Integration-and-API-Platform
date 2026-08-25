@@ -1,0 +1,58 @@
+{
+  "namespace": "com.jdoan.inventory.events.avro",
+  "type": "record",
+  "name": "StockMovementRecorded",
+  "doc": "Emitted when stock physically moves. THE EVENT CONTRACT - the Phase 4 counterpart to inventory-v1.xsd. Compare the two deliberately: both are hand-written schemas that generate code, but only this one is enforced by a registry that can REJECT an incompatible change before it ships.",
+
+  "fields": [
+    {
+      "name": "movementId",
+      "type": "long",
+      "doc": "Primary key from stock_movements. Consumers use this to deduplicate, because outbox delivery is at-least-once."
+    },
+    {
+      "name": "sku",
+      "type": "string",
+      "doc": "Also the Kafka message key, which is what guarantees per-product ordering."
+    },
+    {
+      "name": "warehouseCode",
+      "type": "string"
+    },
+    {
+      "name": "movementType",
+      "type": {
+        "type": "enum",
+        "name": "MovementType",
+        "symbols": ["IN", "OUT", "TRANSFER_IN", "TRANSFER_OUT", "ADJUSTMENT", "RETURN"]
+      },
+      "doc": "Mirrors movement_type_enum in Postgres and MovementTypeType in the XSD. Adding a symbol here is a BACKWARD-compatible change for readers of new data but breaks OLD consumers reading NEW data - which is exactly the forward/backward distinction the exercise explores."
+    },
+    {
+      "name": "quantity",
+      "type": "int"
+    },
+    {
+      "name": "quantityBefore",
+      "type": "int"
+    },
+    {
+      "name": "quantityAfter",
+      "type": "int"
+    },
+    {
+      "name": "referenceType",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "A UNION with null and a default - Avro's way of saying optional. The default is what lets a reader using a NEWER schema decode data written WITHOUT this field. Omit the default and the field becomes required, and the registry will reject it under BACKWARD compatibility."
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      },
+      "doc": "When the movement was recorded, not when it was published. The gap between the two is your outbox lag."
+    }
+  ]
+}

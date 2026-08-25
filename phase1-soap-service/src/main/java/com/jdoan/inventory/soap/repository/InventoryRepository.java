@@ -181,4 +181,28 @@ public class InventoryRepository {
                 .query(Long.class)
                 .single();
     }
+
+    /**
+     * Writes a domain event into the transactional outbox.
+     *
+     * CRITICAL: this runs inside the SAME transaction as insertMovement().
+     * Either the movement and its event both commit, or neither does. That
+     * atomicity is the whole point - a direct kafkaProducer.send() here would
+     * be a "dual write" that can lose events on crash or announce events for
+     * transactions that later roll back.
+     *
+     * A separate relay process publishes these rows to Kafka afterwards.
+     */
+    public void insertOutboxEvent(String sku, String eventType, String topic, String payloadJson) {
+        db.sql("""
+                    INSERT INTO event_outbox
+                        (aggregate_type, aggregate_id, event_type, topic, payload)
+                    VALUES ('StockMovement', :sku, :type, :topic, CAST(:payload AS jsonb))
+                """)
+                .param("sku", sku)
+                .param("type", eventType)
+                .param("topic", topic)
+                .param("payload", payloadJson)
+                .update();
+    }
 }

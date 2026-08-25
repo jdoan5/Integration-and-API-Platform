@@ -118,6 +118,27 @@ public class InventoryEndpoint {
 
         int after = repo.currentQuantity(sku, wh).orElse(0);
 
+        // ---- Publish a domain event, transactionally ----------------------
+        // This INSERT shares the @Transactional boundary with insertMovement()
+        // above, so the movement and its event commit together or not at all.
+        //
+        // We deliberately do NOT call Kafka from here. A send() inside a
+        // transaction is a "dual write": if the transaction later rolls back
+        // the event has already escaped, and if the process dies after
+        // committing but before sending, the event is lost forever. The relay
+        // in phase4-events reads this table and publishes asynchronously.
+        repo.insertOutboxEvent(sku, "StockMovementRecorded",
+                "inventory.stock-movement.v1",
+                """
+                {"sku":"%s","warehouseCode":"%s","movementType":"%s","quantity":%d,\
+                "quantityBefore":%d,"quantityAfter":%d,"movementId":%d,\
+                "referenceType":%s,"occurredAt":"%s"}"""
+                        .formatted(sku, wh, request.getMovementType().value(),
+                                request.getQuantity(), before, after, movementId,
+                                request.getReferenceType() == null
+                                        ? "null" : "\"" + request.getReferenceType() + "\"",
+                                java.time.Instant.now()));
+
         RecordStockMovementResponse response = new RecordStockMovementResponse();
         response.setMovementId(movementId);
         response.setSku(sku);
