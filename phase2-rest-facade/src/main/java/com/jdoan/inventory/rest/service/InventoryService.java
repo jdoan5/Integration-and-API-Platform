@@ -45,6 +45,7 @@ public class InventoryService {
 
     private final AtomicLong hits   = new AtomicLong();
     private final AtomicLong misses = new AtomicLong();
+    private final AtomicLong degraded = new AtomicLong();   // Redis failures survived
 
     public InventoryService(InventorySoapClient soap, StringRedisTemplate redis, ObjectMapper json) {
         this.soap = soap;
@@ -58,7 +59,7 @@ public class InventoryService {
     public ProductDto getProduct(String sku) {
         String key = "product:" + sku;
 
-        String cached = redis.opsForValue().get(key);
+        String cached = cacheGet(key);
         if (cached != null) {
             hits.incrementAndGet();
             log.debug("cache HIT  {}", key);
@@ -75,7 +76,7 @@ public class InventoryService {
                     p.getReorderPoint(), p.getReorderQuantity(), p.isActive());
         }, sku);
 
-        redis.opsForValue().set(key, writeJson(dto), PRODUCT_TTL);
+        cachePut(key, writeJson(dto), PRODUCT_TTL);
         return dto;
     }
 
@@ -85,13 +86,13 @@ public class InventoryService {
     public List<StockLevelDto> getStockLevels(String sku, String warehouseCode) {
         String key = "stock:" + sku + ":" + (warehouseCode == null ? "ALL" : warehouseCode);
 
-        String cached = redis.opsForValue().get(key);
+        String cached = cacheGet(key);
         if (cached != null) {
             hits.incrementAndGet();
             try {
                 return Arrays.asList(json.readValue(cached, StockLevelDto[].class));
             } catch (Exception e) {
-                redis.delete(key);   // poisoned entry: drop it and fall through
+                cacheEvict(Set.of(key));   // poisoned entry: drop it and fall through
             }
         }
 
@@ -105,7 +106,7 @@ public class InventoryService {
                                 s.getQuantity() < s.getReorderPoint()))
                         .toList(), sku);
 
-        redis.opsForValue().set(key, writeJson(result), STOCK_TTL);
+        cachePut(key, writeJson(result), STOCK_TTL);
         return result;
     }
 
@@ -134,7 +135,7 @@ public class InventoryService {
 
         // --- idempotency: replay the stored result instead of writing twice ---
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String stored = redis.opsForValue().get("idem:" + idempotencyKey);
+            String stored = cacheGet("idem:" + idempotencyKey);
             if (stored != null) {
                 log.info("idempotency replay for key {}", idempotencyKey);
                 MovementResultDto prior = readJson(stored, MovementResultDto.class);
@@ -160,16 +161,16 @@ public class InventoryService {
         invalidateStock(request.sku());
 
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            redis.opsForValue().set("idem:" + idempotencyKey, writeJson(result), IDEMPOTENCY_TTL);
+            cachePut("idem:" + idempotencyKey, writeJson(result), IDEMPOTENCY_TTL);
         }
         return result;
     }
 
     /** Deletes every cached stock entry for a SKU, across all warehouses. */
     private void invalidateStock(String sku) {
-        Set<String> keys = redis.keys("stock:" + sku + ":*");
-        if (keys != null && !keys.isEmpty()) {
-            redis.delete(keys);
+        Set<String> keys = cacheKeys("stock:" + sku + ":*");
+        if (!keys.isEmpty()) {
+            cacheEvict(keys);
             log.info("invalidated {} stock cache key(s) for {}", keys.size(), sku);
         }
     }
@@ -179,24 +180,24 @@ public class InventoryService {
     // ==================================================================
     public Map<String, Object> cacheStats() {
         long h = hits.get(), m = misses.get(), total = h + m;
-        Set<String> productKeys = redis.keys("product:*");
-        Set<String> stockKeys   = redis.keys("stock:*");
         return Map.of(
                 "hits", h,
                 "misses", m,
                 "hitRatePercent", total == 0 ? 0.0 : Math.round(1000.0 * h / total) / 10.0,
-                "cachedProducts", productKeys == null ? 0 : productKeys.size(),
-                "cachedStockEntries", stockKeys == null ? 0 : stockKeys.size());
+                "cachedProducts", cacheKeys("product:*").size(),
+                "cachedStockEntries", cacheKeys("stock:*").size(),
+                "redisFailuresSurvived", degraded.get(),
+                "cacheAvailable", redisHealthy());
     }
 
     public long clearCache() {
         Set<String> keys = new HashSet<>();
-        Optional.ofNullable(redis.keys("product:*")).ifPresent(keys::addAll);
-        Optional.ofNullable(redis.keys("stock:*")).ifPresent(keys::addAll);
-        if (keys.isEmpty()) return 0;
-        Long deleted = redis.delete(keys);
+        keys.addAll(cacheKeys("product:*"));
+        keys.addAll(cacheKeys("stock:*"));
+        long count = keys.size();
+        cacheEvict(keys);
         hits.set(0); misses.set(0);
-        return deleted == null ? 0 : deleted;
+        return count;
     }
 
     // ==================================================================
@@ -216,6 +217,79 @@ public class InventoryService {
         } catch (org.springframework.ws.client.WebServiceIOException e) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "Inventory SOAP service is unreachable");
+        }
+    }
+
+    // ==================================================================
+    // FAIL-SOFT CACHE HELPERS
+    //
+    // A cache is an OPTIMISATION, never a dependency. If Redis is down the
+    // service must get slower, not fail - so every Redis call goes through
+    // one of these and swallows infrastructure errors.
+    //
+    // This is the application-level equivalent of Kong's fault_tolerant: true.
+    // The bug these fix was real: with Redis stopped, every read returned 500.
+    // ==================================================================
+
+    /** @return the cached value, or null on a miss OR any Redis failure. */
+    private String cacheGet(String key) {
+        try {
+            return redis.opsForValue().get(key);
+        } catch (Exception e) {
+            degraded.incrementAndGet();
+            log.warn("Redis unavailable on GET {} - serving from source. {}", key, e.getMessage());
+            return null;
+        }
+    }
+
+    /** Best-effort write. A failure here costs performance, never correctness. */
+    private void cachePut(String key, String value, Duration ttl) {
+        try {
+            redis.opsForValue().set(key, value, ttl);
+        } catch (Exception e) {
+            degraded.incrementAndGet();
+            log.warn("Redis unavailable on SET {} - continuing uncached. {}", key, e.getMessage());
+        }
+    }
+
+    /**
+     * Best-effort delete.
+     *
+     * NOTE the asymmetry: a failed READ is harmless, but a failed
+     * INVALIDATION leaves stale data behind. It is logged at ERROR because
+     * it is a correctness risk, not just a slowdown. The TTL is the backstop
+     * that eventually repairs it - which is exactly why stock has a 30s TTL
+     * rather than an indefinite one.
+     */
+    private void cacheEvict(Collection<String> keys) {
+        if (keys == null || keys.isEmpty()) return;
+        try {
+            redis.delete(keys);
+        } catch (Exception e) {
+            degraded.incrementAndGet();
+            log.error("Redis unavailable on DELETE {} - stale entries persist until TTL expiry. {}",
+                    keys, e.getMessage());
+        }
+    }
+
+    /** Null-safe KEYS lookup that tolerates Redis being unavailable. */
+    private Set<String> cacheKeys(String pattern) {
+        try {
+            Set<String> keys = redis.keys(pattern);
+            return keys == null ? Set.of() : keys;
+        } catch (Exception e) {
+            degraded.incrementAndGet();
+            return Set.of();
+        }
+    }
+
+    /** Cheap liveness probe so /_cache/stats can report the real state. */
+    private boolean redisHealthy() {
+        try {
+            redis.hasKey("__healthcheck__");
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
