@@ -64,7 +64,7 @@ public class InventoryRepository {
                            quantity, reorder_point, last_updated
                     FROM v_current_stock
                     WHERE sku = :sku
-                      AND (:wh IS NULL OR warehouse_code = :wh)
+                      AND (CAST(:wh AS text) IS NULL OR warehouse_code = CAST(:wh AS text))
                     ORDER BY warehouse_code
                 """)
                 .param("sku", sku)
@@ -91,7 +91,7 @@ public class InventoryRepository {
                     SELECT sku, product_name, warehouse_code, quantity,
                            reorder_point, deficit, suggested_order_qty
                     FROM v_low_stock_items
-                    WHERE (:wh IS NULL OR warehouse_code = :wh)
+                    WHERE (CAST(:wh AS text) IS NULL OR warehouse_code = CAST(:wh AS text))
                     ORDER BY deficit DESC
                     LIMIT :lim
                 """)
@@ -111,8 +111,17 @@ public class InventoryRepository {
                 .list();
     }
 
+    /**
+     * Note the CASTs here and in the two queries above.
+     *
+     * Postgres cannot infer a parameter's type when it appears only inside an
+     * IS NULL test - the server rejects the statement with "could not determine
+     * data type of parameter $1". Wrapping it in CAST(... AS text) tells the
+     * planner what it is. This bites every optional-filter query written this
+     * way against Postgres, and the error message never mentions IS NULL.
+     */
     public int countLowStock(String warehouseCode) {
-        return db.sql("SELECT COUNT(*) FROM v_low_stock_items WHERE (:wh IS NULL OR warehouse_code = :wh)")
+        return db.sql("SELECT COUNT(*) FROM v_low_stock_items WHERE (CAST(:wh AS text) IS NULL OR warehouse_code = CAST(:wh AS text))")
                 .param("wh", warehouseCode)
                 .query(Integer.class)
                 .single();
