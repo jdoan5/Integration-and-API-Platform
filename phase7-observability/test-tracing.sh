@@ -87,16 +87,38 @@ echo "  Phase 6's counter said '7 backend calls' and was right. This is the"
 echo "  same fact with a shape: one parent, a repeating child, all sequential."
 
 # ---------------------------------------------------------------------------
-banner "3. ONE trace across REST -> SOAP"
+banner "3. The agent's tool call reaches the database, in one trace"
+MCP_SVCS=$(analyse mcp-inventory-server "len(svcs)")
+if [ "$MCP_SVCS" = "NO_TRACES" ]; then
+    skip "the MCP server has not sent spans - run the agent first:"
+    echo "    ./phase5-mcp-agent/.venv/bin/python -m agent.cli 'why is ELEC-LAP-001 low?'"
+else
+    [ "${MCP_SVCS:-0}" -ge 2 ] \
+        && pass "an MCP tool call and the platform share one trace ($MCP_SVCS services)" \
+        || fail "the MCP trace covers only $MCP_SVCS service"
+    ROOT=$(analyse mcp-inventory-server "min(t['spans'], key=lambda s: s['startTime'])['operationName']")
+    case "$ROOT" in
+        mcp.tool*) pass "the trace is rooted at the tool the model chose: '$ROOT'" ;;
+        *) fail "expected an mcp.tool root span, got '$ROOT'" ;;
+    esac
+    echo "  The root is the MCP server, NOT the agent - see the README on why"
+    echo "  trace context cannot cross the stdio boundary today."
+fi
+
+# ---------------------------------------------------------------------------
+banner "4. ONE trace across REST -> SOAP"
 curl -s "$REST/api/v1/products/ELEC-AUD-001" >/dev/null
 sleep "$SETTLE"
 REST_SVCS=$(analyse rest-facade "len(svcs)")
-[ "$REST_SVCS" = "2" ] \
-    && pass "the REST facade's trace reaches the SOAP service too" \
-    || fail "expected 2 services in the REST trace, got $REST_SVCS"
+# >= 2, not == 2. Once the MCP server was instrumented the richest rest-facade
+# trace became the agent's, which spans three services - and an assertion that
+# the number is exactly two would fail on the system getting MORE observable.
+[ "${REST_SVCS:-0}" -ge 2 ] \
+    && pass "the REST facade's trace reaches the SOAP service too ($REST_SVCS services)" \
+    || fail "expected the REST trace to span 2+ services, got $REST_SVCS"
 
 # ---------------------------------------------------------------------------
-banner "4. The infrastructure shows up, unasked"
+banner "5. The infrastructure shows up, unasked"
 REDIS_OPS=$(analyse rest-facade "sum(v for k,v in ops.items() if k in ('get','set','evalsha','del'))")
 [ "${REDIS_OPS:-0}" -ge 1 ] \
     && pass "$REDIS_OPS Redis operations instrumented without a line of code" \
@@ -105,7 +127,7 @@ echo "  evalsha is the Lua rate limiter from Phase 2; get/set are cache-aside."
 echo "  Nobody wrote these spans. That is the argument for a standard."
 
 # ---------------------------------------------------------------------------
-banner "5. Trace context survives the gateway"
+banner "6. Trace context survives the gateway"
 if ! curl -sf -o /dev/null --max-time 2 "$PROXY/api/v1/products/ELEC-LAP-001" -H "apikey: $KEY"; then
     skip "Kong is not reachable"
 else

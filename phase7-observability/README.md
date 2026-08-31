@@ -5,7 +5,7 @@ the platform stops being six services that each work and becomes one system you
 can watch.
 
 - **Jaeger UI:** <http://localhost:16686>
-- **Instrumented:** Phase 1 (SOAP), Phase 2 (REST), Phase 6 (GraphQL)
+- **Instrumented:** Phase 1 (SOAP), Phase 2 (REST), Phase 5 (MCP server), Phase 6 (GraphQL)
 - **Verify:** [`test-tracing.sh`](test-tracing.sh)
 
 ## Run it
@@ -99,6 +99,57 @@ across the thread boundary, and six 3ms calls do not justify either.
 claim the code was making about itself.** That is the whole argument for this
 phase, and I would not have found it by reading the code, because I wrote the
 code.
+
+## The agent's tool call, all the way down
+
+Phase 5's MCP server exports spans too, so a trace now starts at the tool the
+model chose and ends in PostgreSQL:
+
+```
+mcp.tool get_product                     35.9ms   ← what the model decided to do
+  GET                                    35.3ms   ← httpx, carrying traceparent
+    http get /api/v1/products/{sku}      23.6ms   ← REST facade, through Kong
+      evalsha                             1.1ms   ← the Lua rate limiter
+      get · get                                   ← cache-aside lookups
+      http post                           9.5ms   ← SOAP service
+      set                                 0.9ms   ← cache write
+```
+
+One line does the joining — `HTTPXClientInstrumentor().instrument()`. Everything
+below `GET` is Java, instrumented separately, and it attaches itself because
+both sides agreed on `traceparent`. Nobody wrote glue.
+
+The `mcp.tool` span on top is the part worth having: it names the decision, so
+the waterfall reads as *what the model did* with *what that cost* nested
+underneath, rather than as a pile of orphaned HTTP calls.
+
+## Where the trace starts, and why not earlier
+
+The root span is the **MCP server**, not the LangGraph agent — so the model's
+own thinking time is outside the trace. That is a limitation of the plumbing
+today, not a design choice, and it is worth being precise about because the
+obvious summary ("MCP has no trace propagation") is wrong:
+
+| | |
+|---|---|
+| The MCP protocol | **has** a `_meta` slot on tool calls |
+| The Python SDK, client side | **exposes** it — `CallToolRequestParams.meta` |
+| The Python SDK, server side | **exposes** it — `ctx.request_context.meta` |
+| `langchain-mcp-adapters` | gives an interceptor only `headers` — and **stdio has no headers** |
+
+So both ends of the protocol could carry a `traceparent` and neither end is
+missing the field. The gap is one library's interceptor surface, on the one
+transport that matters here: stdio is what this project uses and what Claude
+Desktop launches.
+
+The available hack — smuggling the trace id in as a tool *argument* — was
+rejected. Tool arguments are part of the schema the model reads, and putting
+telemetry plumbing in the contract would corrupt the very thing Phase 5 is
+about.
+
+What is lost is the agent's own latency, which LangSmith or an LLM-level tracer
+measures anyway. What is kept is every hop that touches infrastructure, which is
+the expensive part and the part that pages someone.
 
 ## What you get without writing any code
 

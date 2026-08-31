@@ -146,6 +146,14 @@ That is the same argument the XSD made in Phase 1, in a fifth protocol.
   writes duplicated in silence. Failing open is right for reads and dangerous
   for writes, and the two paths now use different code — a caller who supplies
   an `idempotencyKey` gets a refusal rather than a duplicate.
+- **The bundled GraphiQL ignores `?query=`.** The obvious way to give a demo
+  visitor a starting point is a prefilled query in the URL, and it silently does
+  nothing here — verified with `localStorage` cleared, so it is not stale saved
+  state: the Monaco-based GraphiQL that Boot 4.1.1 bundles renders its own
+  welcome text regardless. Someone landing on the demo therefore types a generic
+  users-and-articles sample, gets a perfectly correct `FieldUndefined`
+  validation error, and reads it as a broken demo. The starter queries live on
+  the portfolio page instead, where they actually reach the reader.
 - **Spring Boot 4 ships Jackson 3, and Jackson 3 moved its root package.**
   `com.fasterxml.jackson.databind` → `tools.jackson.databind`, and
   `JacksonException` is now **unchecked**. Every Jackson snippet written before

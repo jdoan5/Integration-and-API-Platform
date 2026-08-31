@@ -53,6 +53,13 @@ class Settings:
     # needs no credentials and still drives the real MCP tools.
     llm_provider: str = field(default_factory=lambda: _env("MCP_LLM_PROVIDER", "auto").lower())
 
+    # Tracing. Same OTLP endpoint the Java services use, so the spans land in
+    # the same Jaeger and join the same trace.
+    otlp_endpoint: str = field(
+        default_factory=lambda: _env("OTLP_ENDPOINT", "http://localhost:4318/v1/traces"))
+    tracing_enabled: bool = field(
+        default_factory=lambda: _env("MCP_TRACING", "1") not in ("0", "false", "no"))
+
     @property
     def rest_root(self) -> str:
         return f"{self.base_url.rstrip('/')}/api/v1"

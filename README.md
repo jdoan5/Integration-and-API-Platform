@@ -267,6 +267,10 @@ about it:
 - **A tracing exporter configured with a property Boot 4 ignores.** Boot 3's
   name produces no warning and no traces — everything starts cleanly and the
   data simply is not there.
+- **"MCP cannot propagate trace context" turned out to be wrong.** The protocol
+  has a `_meta` slot and the SDK exposes it on both ends; it is one library's
+  interceptor that only offers HTTP headers, on the one transport that has
+  none. Worth checking before repeating the summary.
 
 Each is documented as a gotcha in the relevant phase README.
 

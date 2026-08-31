@@ -29,6 +29,7 @@ from mcp.types import ToolAnnotations
 
 from .client import InventoryClient, InventoryError, movement_idempotency_key
 from .config import settings
+from .tracing import setup_tracing, tool_span
 
 # Constraints copied from the Phase 1 XSD. They are repeated in the tool
 # docstrings because a model reads the schema description, not the WSDL - the
@@ -84,6 +85,10 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[ServerContext]:
     The session id seeds every Idempotency-Key, so two identical write calls in
     one session collapse to one movement while the same call tomorrow does not.
     """
+    # Before the client is constructed: HTTPXClientInstrumentor patches the
+    # class, so a client built earlier would never carry a traceparent.
+    setup_tracing()
+
     session_id = str(uuid.uuid4())
     async with InventoryClient() as client:
         yield ServerContext(client=client, session_id=session_id)
@@ -132,8 +137,9 @@ async def get_product(sku: str, ctx: Context) -> dict[str, Any]:
     Returns the product's reorderPoint and reorderQuantity, which are what you
     need to decide whether a stock level is actually a problem.
     """
-    _check_sku(sku)
-    return await _ctx(ctx).client.get_product(sku)
+    with tool_span("get_product", **{"inventory.sku": sku}):
+        _check_sku(sku)
+        return await _ctx(ctx).client.get_product(sku)
 
 
 @mcp.tool(
@@ -154,11 +160,12 @@ async def get_stock(sku: str, ctx: Context, warehouse: str | None = None) -> lis
     Each row carries ``belowReorderPoint``, already computed - compare against
     that rather than doing the arithmetic yourself.
     """
-    _check_sku(sku)
-    if warehouse:
-        _check_warehouse(warehouse)
+    with tool_span("get_stock", **{"inventory.sku": sku, "inventory.warehouse": warehouse}):
+        _check_sku(sku)
+        if warehouse:
+            _check_warehouse(warehouse)
 
-    levels = await _ctx(ctx).client.get_stock(sku, warehouse)
+        levels = await _ctx(ctx).client.get_stock(sku, warehouse)
 
     # An unknown warehouse returns 200 [] rather than 404, which is
     # indistinguishable from "stocked here, quantity zero" - a stock row with
@@ -166,13 +173,13 @@ async def get_stock(sku: str, ctx: Context, warehouse: str | None = None) -> lis
     # makes it report "no stock at WH-NYC" for a warehouse that does not exist.
     # An error naming both possibilities is the only answer that is not
     # silently wrong.
-    if warehouse and not levels:
-        raise InventoryError(
-            f"No stock rows for {sku} at {warehouse}. Either {warehouse} is not a warehouse "
-            f"(the ones that exist are {', '.join(KNOWN_WAREHOUSES)}), or this product is not "
-            f"stocked there. Call get_stock without the warehouse filter to see where it is."
-        )
-    return levels
+        if warehouse and not levels:
+            raise InventoryError(
+                f"No stock rows for {sku} at {warehouse}. Either {warehouse} is not a warehouse "
+                f"(the ones that exist are {', '.join(KNOWN_WAREHOUSES)}), or this product is not "
+                f"stocked there. Call get_stock without the warehouse filter to see where it is."
+            )
+        return levels
 
 
 @mcp.tool(
@@ -193,9 +200,10 @@ async def list_low_stock(ctx: Context, warehouse: str | None = None, limit: int 
     Start here for "what needs restocking?" questions rather than checking SKUs
     one at a time - one call instead of dozens, and it stays inside the rate limit.
     """
-    if warehouse:
-        _check_warehouse(warehouse)
-    return await _ctx(ctx).client.list_low_stock(warehouse, limit)
+    with tool_span("list_low_stock", **{"inventory.warehouse": warehouse}):
+        if warehouse:
+            _check_warehouse(warehouse)
+        return await _ctx(ctx).client.list_low_stock(warehouse, limit)
 
 
 @mcp.tool(
@@ -213,7 +221,8 @@ async def daily_movement_totals(ctx: Context) -> list[dict[str, Any]]:
     it to answer "what happened to this product recently?" and to explain WHY a
     stock level is where it is.
     """
-    return await _ctx(ctx).client.daily_totals()
+    with tool_span("daily_movement_totals"):
+        return await _ctx(ctx).client.daily_totals()
 
 
 @mcp.tool(
@@ -231,16 +240,18 @@ async def platform_status(ctx: Context) -> dict[str, Any]:
     ``worstLagSeconds`` means the read model is behind, so a movement may have
     happened that the daily totals do not show yet.
     """
-    ctxt = _ctx(ctx)
-    result: dict[str, Any] = {}
-    for name, call in (("cache", ctxt.client.cache_stats), ("events", ctxt.client.pipeline_status)):
-        try:
-            result[name] = await call()
-        except InventoryError as exc:
-            # Partial health is more useful than an exception. The events app on
-            # 8083 is optional; the cache lives behind the gateway.
-            result[name] = {"unavailable": str(exc)}
-    return result
+    with tool_span("platform_status"):
+        ctxt = _ctx(ctx)
+        result: dict[str, Any] = {}
+        for name, call in (("cache", ctxt.client.cache_stats),
+                           ("events", ctxt.client.pipeline_status)):
+            try:
+                result[name] = await call()
+            except InventoryError as exc:
+                # Partial health is more useful than an exception. The events app
+                # on 8083 is optional; the cache lives behind the gateway.
+                result[name] = {"unavailable": str(exc)}
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +291,12 @@ async def record_movement(
     second response has ``replayed: true``. That is a safety net, not a licence -
     ask the user before recording a movement you were not explicitly asked for.
     """
+    span_attrs = {
+        "inventory.sku": sku,
+        "inventory.warehouse": warehouse_code,
+        "inventory.movement_type": movement_type,
+        "inventory.quantity": quantity,
+    }
     if movement_type not in MOVEMENT_TYPES:
         # Caught here rather than at the facade so the model gets the valid set
         # back instead of a bare 400.
@@ -295,20 +312,27 @@ async def record_movement(
     _check_sku(sku)
     _check_warehouse(warehouse_code)
 
-    ctxt = _ctx(ctx)
-    key = movement_idempotency_key(
-        ctxt.session_id, sku, warehouse_code, movement_type, quantity
-    )
-    await ctx.info(f"Recording {movement_type} {quantity} x {sku} at {warehouse_code}")
-    return await ctxt.client.record_movement(
-        sku=sku,
-        warehouse_code=warehouse_code,
-        movement_type=movement_type,
-        quantity=quantity,
-        reference_type=reference_type,
-        notes=notes,
-        idempotency_key=key,
-    )
+    with tool_span("record_movement", **span_attrs) as span:
+        ctxt = _ctx(ctx)
+        key = movement_idempotency_key(
+            ctxt.session_id, sku, warehouse_code, movement_type, quantity
+        )
+        # The derived key on the span, so a duplicate write is diagnosable from
+        # the trace alone rather than by reasoning about what the model did.
+        span.set_attribute("inventory.idempotency_key", key)
+        await ctx.info(f"Recording {movement_type} {quantity} x {sku} at {warehouse_code}")
+
+        result = await ctxt.client.record_movement(
+            sku=sku,
+            warehouse_code=warehouse_code,
+            movement_type=movement_type,
+            quantity=quantity,
+            reference_type=reference_type,
+            notes=notes,
+            idempotency_key=key,
+        )
+        span.set_attribute("inventory.replayed", bool(result.get("replayed")))
+        return result
 
 
 # ---------------------------------------------------------------------------

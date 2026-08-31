@@ -191,6 +191,38 @@ turns an infrastructure failure into a predictable agent behaviour.
   that deployment. Passing `gpt-4o` when the deployment is called `prod-chat`
   fails with a 404 that mentions neither.
 
+## Tracing
+
+The server exports OpenTelemetry spans to the same Jaeger the Java services use,
+so an agent's tool call and the platform it hits end up in **one trace**:
+
+```bash
+docker compose up -d jaeger
+```
+
+```bash
+./.venv/bin/python -m agent.cli "why is ELEC-LAP-001 low on stock?"
+```
+
+Then open <http://localhost:16686> and pick `mcp-inventory-server`. Each tool
+call is an `mcp.tool <name>` span with the HTTP, Redis and SOAP work nested
+underneath it.
+
+The join is one line — `HTTPXClientInstrumentor().instrument()` — which writes
+`traceparent` onto every outgoing call so the Java side continues the trace
+rather than starting its own. `record_movement` also puts the derived
+idempotency key on its span, so a suspected duplicate write is diagnosable from
+the trace instead of by reasoning about what the model was thinking.
+
+Set `MCP_TRACING=0` to turn it off. See
+[phase 7](../phase7-observability/README.md) for why the trace starts at this
+server rather than at the agent.
+
+**One thing to be careful of:** on stdio transport stdout belongs to the
+protocol, so the exporter's logging is pinned to stderr and quietened. An
+exporter that cannot reach Jaeger has to be a silence — a stray line on stdout
+corrupts JSON-RPC and kills the session with a parse error that names no cause.
+
 ## Configuration
 
 Every value has a working local default, so none of this is required:
