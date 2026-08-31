@@ -5,7 +5,7 @@ the platform stops being six services that each work and becomes one system you
 can watch.
 
 - **Jaeger UI:** <http://localhost:16686>
-- **Instrumented:** Phase 1 (SOAP), Phase 2 (REST), Phase 5 (MCP server), Phase 6 (GraphQL)
+- **Instrumented:** Phase 1 (SOAP), Phase 2 (REST), Phase 4 (events), Phase 5 (MCP server), Phase 6 (GraphQL)
 - **Verify:** [`test-tracing.sh`](test-tracing.sh)
 
 ## Run it
@@ -151,6 +151,41 @@ What is lost is the agent's own latency, which LangSmith or an LLM-level tracer
 measures anyway. What is kept is every hop that touches infrastructure, which is
 the expensive part and the part that pages someone.
 
+## Two traces, and why that is correct
+
+The event path traces too, and context crosses Kafka:
+
+```
+task outboxRelay.relay                      internal
+  inventory.stock-movement.v1 send          producer
+    inventory.stock-movement.v1 process     consumer   ← low-stock alerter
+    inventory.stock-movement.v1 process     consumer   ← read-model projector
+```
+
+A broker is not an HTTP hop: the producer has to write `traceparent` into the
+record headers and the consumer has to read it back. Spring does both once
+`spring.kafka.template.observation-enabled` and
+`spring.kafka.listener.observation-enabled` are set — and the trace id then
+shows up in the consumer's own log MDC, which is the join between traces and
+logs people usually build by hand.
+
+**But this is a SECOND trace, not a continuation of the first.** The HTTP write
+that caused it lives in its own trace and stops at PostgreSQL. That is not a
+dropped hop — it is the transactional outbox doing its job. The relay reads a
+row on a schedule, possibly minutes later, in a different transaction, with no
+in-process context to inherit. Decoupling the write from the publish is the
+entire point of the pattern; a trace that spanned both would mean the publish
+was still attached to the request, which is the dual-write bug Phase 4 exists to
+avoid.
+
+Joining them anyway is possible — store `traceparent` on the outbox row and
+restore it in the relay as a span link. It is deliberately not done here,
+because in this design the outbox row is written by a **PostgreSQL trigger**,
+so the application never sees it being created. Threading telemetry through a
+database trigger to make one waterfall prettier is a bad trade, and "these are
+two traces linked by an event id" is the honest description of an asynchronous
+system.
+
 ## What you get without writing any code
 
 The Redis spans in that waterfall were free. Nobody instrumented the cache:
@@ -184,6 +219,13 @@ belongs in the README rather than being discovered later.
   `management.opentelemetry.tracing.export.otlp.endpoint`. Same family as every
   other Boot 4 relocation, and the failure mode is the worst kind: everything
   starts cleanly and the data just is not there.
+- **A hand-built bean opts out of the properties that configured the bean it
+  replaced.** `spring.kafka.listener.observation-enabled=true` configures the
+  container factory Boot *auto-configures*; this project builds its own for the
+  Avro deserialiser, so the flag did nothing. The producer emitted spans, the
+  consumers processed records, and there were simply no consumer spans — no
+  warning, no error, nothing to grep. One line on the factory
+  (`getContainerProperties().setObservationEnabled(true)`) fixed it.
 - **`WebServiceTemplate` is not auto-instrumented**, as above. Anything not
   speaking through `RestClient`/`WebClient`/the servlet stack needs the header
   injected by hand.

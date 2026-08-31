@@ -118,7 +118,31 @@ REST_SVCS=$(analyse rest-facade "len(svcs)")
     || fail "expected the REST trace to span 2+ services, got $REST_SVCS"
 
 # ---------------------------------------------------------------------------
-banner "5. The infrastructure shows up, unasked"
+banner "5. The event path traces too, as its own trace"
+# Generate one, rather than asserting on whatever happens to be in Jaeger:
+# the relay polls on a schedule, so a stale window is full of empty poll spans
+# and the assertion passes or fails on timing rather than behaviour.
+curl -s -X POST "$REST/api/v1/movements" -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: trace-suite-$$" \
+     -d '{"sku":"ELEC-LAP-001","warehouseCode":"WH-EAST","movementType":"ADJUSTMENT","quantity":1}' \
+     >/dev/null 2>&1
+sleep "$((SETTLE + 12))"   # outbox poll + Kafka round trip + export
+
+EV_SPANS=$(analyse events "len(t['spans'])")
+if [ "$EV_SPANS" = "NO_TRACES" ]; then
+    skip "the events app has sent no spans (is it running on :8083?)"
+else
+    KINDS=$(analyse events "sum(1 for s in t['spans'] for tg in s['tags'] if tg['key']=='span.kind' and tg['value']=='consumer')")
+    [ "${KINDS:-0}" -ge 2 ] \
+        && pass "trace context crossed Kafka to both consumers ($KINDS consumer spans)" \
+        || fail "expected 2 consumer spans in the event trace, got ${KINDS:-0}"
+    echo "  A broker is not an HTTP hop: the producer writes traceparent into the"
+    echo "  record headers and the consumer reads it back. This is a SECOND trace,"
+    echo "  not a continuation - the outbox is a deliberate boundary, not a break."
+fi
+
+# ---------------------------------------------------------------------------
+banner "6. The infrastructure shows up, unasked"
 REDIS_OPS=$(analyse rest-facade "sum(v for k,v in ops.items() if k in ('get','set','evalsha','del'))")
 [ "${REDIS_OPS:-0}" -ge 1 ] \
     && pass "$REDIS_OPS Redis operations instrumented without a line of code" \
@@ -127,7 +151,7 @@ echo "  evalsha is the Lua rate limiter from Phase 2; get/set are cache-aside."
 echo "  Nobody wrote these spans. That is the argument for a standard."
 
 # ---------------------------------------------------------------------------
-banner "6. Trace context survives the gateway"
+banner "7. Trace context survives the gateway"
 if ! curl -sf -o /dev/null --max-time 2 "$PROXY/api/v1/products/ELEC-LAP-001" -H "apikey: $KEY"; then
     skip "Kong is not reachable"
 else

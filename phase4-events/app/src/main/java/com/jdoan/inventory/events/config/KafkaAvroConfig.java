@@ -56,6 +56,17 @@ public class KafkaAvroConfig {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(avroConsumerFactory);
+
+        // WHY THIS LINE EXISTS. `spring.kafka.listener.observation-enabled=true`
+        // configures the factory Boot AUTO-CONFIGURES. This factory is built by
+        // hand, so it silently ignores the property - the producer side was
+        // emitting spans, the consumers were processing records, and there were
+        // no consumer spans anywhere with nothing reporting a problem.
+        //
+        // A hand-built bean opts out of every property that configures the bean
+        // it replaced. That is obvious in hindsight and invisible at runtime.
+        factory.getContainerProperties().setObservationEnabled(true);
+
         return factory;
     }
 }
