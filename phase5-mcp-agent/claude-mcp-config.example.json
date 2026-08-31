@@ -1,0 +1,18 @@
+{
+  "//": "Register this server with an MCP client. For Claude Desktop, merge the",
+  "//2": "mcpServers block into ~/Library/Application Support/Claude/claude_desktop_config.json.",
+  "//3": "For Claude Code, run the CLI form in the README instead - it writes .mcp.json for you.",
+  "//4": "Paths must be ABSOLUTE: the client spawns this process with an unpredictable cwd.",
+  "mcpServers": {
+    "inventory": {
+      "command": "/ABSOLUTE/PATH/TO/Integration-and-API-Platform/phase5-mcp-agent/.venv/bin/python",
+      "args": ["-m", "inventory_mcp"],
+      "cwd": "/ABSOLUTE/PATH/TO/Integration-and-API-Platform/phase5-mcp-agent",
+      "env": {
+        "MCP_BASE_URL": "http://localhost:8000",
+        "MCP_API_KEY": "local-demo-key-internal",
+        "MCP_CLIENT_ID": "claude-desktop"
+      }
+    }
+  }
+}

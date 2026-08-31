@@ -5,7 +5,8 @@ SOAP service, a REST facade with Redis, a Kong API gateway, and Kafka event
 streaming with schema governance — all over a real PostgreSQL inventory domain.
 
 **Skills:** SOAP · XML Schema (XSD) · service contracts & versioning · Redis ·
-Kong API Gateway · Kafka · Avro · Schema Registry · transactional outbox · CQRS
+Kong API Gateway · Kafka · Avro · Schema Registry · transactional outbox · CQRS ·
+MCP · LangGraph · Azure OpenAI
 
 ---
 
@@ -14,6 +15,8 @@ Kong API Gateway · Kafka · Avro · Schema Registry · transactional outbox · 
 ```mermaid
 flowchart LR
     Client([Consumer])
+    Agent["LangGraph Agent<br/>Azure OpenAI"]
+    MCP["MCP Server<br/>tools · resources · prompts"]
     Kong[["Kong Gateway<br/>auth · rate limit · trace"]]
     REST["REST Facade<br/>cache · idempotency"]
     SOAP["SOAP Service<br/>contract-first, XSD-validated"]
@@ -23,6 +26,8 @@ flowchart LR
     Kafka{{"Kafka<br/>+ Schema Registry"}}
     Cons["Consumers<br/>alerter · projector"]
 
+    Agent -->|stdio / HTTP| MCP
+    MCP -->|apikey| Kong
     Client -->|apikey| Kong
     Kong --> REST
     Kong -->|/soap| SOAP
@@ -45,6 +50,7 @@ relay → Kafka → consumers → read model.**
 | [2 — REST facade](phase2-rest-facade/) | Redis caching, rate limiting, strangler fig | ✅ Working |
 | [3 — API gateway](phase3-gateway/) | Kong: auth, rate limiting, tracing | ✅ Working |
 | [4 — Events](phase4-events/) | Kafka, Avro, Schema Registry, outbox | ✅ Working |
+| [5 — MCP & agent](phase5-mcp-agent/) | MCP, LangGraph, Azure OpenAI | ✅ Working |
 
 Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 
@@ -91,6 +97,7 @@ Verify the whole chain:
 | 8081 | SOAP service |
 | 8082 | REST facade |
 | 8083 | Events (outbox relay + consumers) |
+| 8084 | MCP server (streamable HTTP) |
 | 9092 / 8085 | Kafka / Schema Registry |
 | 6379 / 5432 | Redis / PostgreSQL |
 
@@ -147,6 +154,20 @@ valuable exercise here: the registry accepts an optional field with a default,
 **rejects** a required field without one, and — surprisingly — accepts *removing*
 a required field under `BACKWARD`.
 
+### [5 — MCP server & LangGraph agent](phase5-mcp-agent/)
+
+The **fourth contract**, this one for language models. An MCP server publishes
+the platform as six tools, three resources and two prompts; a LangGraph agent on
+Azure OpenAI consumes them — and so can Claude Code, over the same stdio
+transport.
+
+The consumer is what makes it interesting. The first three contracts were read
+by programs someone wrote and tested. This one is read at runtime by something
+that improvises: it retries, invents plausible arguments, and will call the write
+endpoint twice. Every guard already in this repo held it, unchanged.
+
+Runs with no credentials — a scripted offline model still drives the real tools.
+
 ---
 
 ## What this project is really about
@@ -181,6 +202,9 @@ about it:
   Redis went down.
 - **`"X-Gateway: kong"` producing the value `" kong"`** — Kong keeps everything
   after the colon, whitespace included, and a presence-only assertion missed it.
+- **An MCP server that bound on top of the gateway.** FastMCP defaults to port
+  8000, which is Kong's proxy port here, so every tool call went to Kong's
+  router and 404'd.
 
 Each is documented as a gotcha in the relevant phase README.
 

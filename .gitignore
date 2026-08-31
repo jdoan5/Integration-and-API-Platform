@@ -2,6 +2,14 @@
 target/
 !.mvn/wrapper/maven-wrapper.jar
 
+# --- Python (Phase 5) -------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
 # --- secrets: never commit these -------------------------------------------
 .env
 .env.*

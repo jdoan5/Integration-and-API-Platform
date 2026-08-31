@@ -182,6 +182,45 @@ are produced transactionally with the database write. Genuinely senior-level.
 
 ---
 
+## Phase 5 — MCP server & LangGraph agent ✅ *built*
+
+**Directory:** `phase5-mcp-agent/`
+**Skills:** MCP (Model Context Protocol), LangGraph, Azure OpenAI, agent safety
+
+The fourth contract in this repo, and the first one whose consumer is not a
+program someone wrote. An MCP server publishes the platform as tools; a
+LangGraph agent consumes it; so does Claude Code, over the same stdio transport.
+
+| Concept | Where it lives |
+|---|---|
+| Tool schemas as a contract | `inventory_mcp/server.py` docstrings + type hints |
+| Tool annotations (`readOnlyHint`, `destructiveHint`) | the `@mcp.tool` decorators |
+| MCP resources | `inventory://contract/openapi` serves the Phase 2 spec itself |
+| MCP prompts | `investigate_low_stock`, `restock_plan` |
+| Both transports | stdio for desktop clients, streamable HTTP on `:8084` |
+| Human-in-the-loop | `HumanInTheLoopMiddleware`, only on the write |
+| Call budget | `ToolCallLimitMiddleware` at 15, below Kong's 20/min |
+| Derived idempotency | `uuid5(session, sku, warehouse, type, qty)` |
+
+**The lesson that matters:** an LLM is a non-deterministic consumer of a
+deterministic contract. It retries, invents arguments, and calls the write
+endpoint twice. Every guard built in Phases 1–3 for human-written clients held
+it without modification — which is the argument for building the platform first
+and the agent last, rather than the other way round.
+
+**Exercises to go further**
+1. **Make it misbehave on purpose.** Prompt the agent to record the same
+   movement twice and confirm the second response says `replayed: true`.
+2. **Take Redis down** while the agent runs. Reads still work; the rate limiter
+   fails open. Compare with what the model *says* happened.
+3. **Break the contract.** Remove `movementType` from the tool signature and
+   watch the model confidently guess a value — then put it back and note that
+   the XSD would have caught it either way.
+4. **Add sampling.** MCP lets a server ask the client's model a question; use it
+   to summarise a movement history server-side.
+
+---
+
 ## Suggested pace
 
 | Phase | Effort | Ship when |
@@ -190,6 +229,7 @@ are produced transactionally with the database write. Genuinely senior-level.
 | 2 — REST + Redis | 1–2 weeks | Cache hit-rate visible, rate limiter works, invalidation correct |
 | 3 — Kong | 1 week | Auth + rate limiting + correlation IDs through the whole chain |
 | 4 — Kafka | 2–3 weeks | Events flowing, consumers running, schema evolution demonstrated |
+| 5 — MCP + agent | 1–2 weeks | Tools callable from Claude Code, write gated by approval |
 
 Commit at the end of each phase with a README showing how to run it. A reviewer
 should be able to `docker compose up` and hit a working endpoint in under five
