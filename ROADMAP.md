@@ -256,6 +256,35 @@ coarse throttling and the correlation ID; it simply cannot do this one.
 
 ---
 
+## Phase 7 — Distributed tracing ✅ *built*
+
+**Directory:** `phase7-observability/`
+**Skills:** OpenTelemetry, Jaeger, context propagation, sampling trade-offs
+
+| Concept | Where it lives |
+|---|---|
+| OTLP export | `spring-boot-starter-opentelemetry` in phases 1, 2 and 6 |
+| Manual context propagation | `OutboundSoapHeaders` — the hop nothing instruments |
+| Free instrumentation | Redis `get`/`set`/`evalsha` spans nobody wrote |
+| Caller-supplied trace ids | a `traceparent` sent to Kong is adopted, not replaced |
+| Sampling | 1.0 locally, and an honest note on why that cannot ship |
+
+**The lesson that matters:** a correlation id is a join key; a trace is a
+structure. The difference is not convenience. Phase 6 counted its N+1 correctly
+and still described itself wrongly — the counter confirmed what it was asked to
+count, and only the waterfall showed that six "parallel" calls were sequential.
+
+**Exercises to go further**
+1. **Break it on purpose.** Comment out the `traceparent` injection and watch
+   two healthy services report two unrelated traces with no error anywhere.
+2. **Trace the agent.** Phase 5's MCP server is not instrumented yet; a trace
+   that starts at the LLM and ends at Postgres is the full picture.
+3. **Add tail-based sampling** with an OpenTelemetry Collector, and keep only
+   traces that were slow or errored.
+4. **Add metrics and logs** to the same pipeline — the exporter is already there.
+
+---
+
 ## Suggested pace
 
 | Phase | Effort | Ship when |
@@ -266,6 +295,7 @@ coarse throttling and the correlation ID; it simply cannot do this one.
 | 4 — Kafka | 2–3 weeks | Events flowing, consumers running, schema evolution demonstrated |
 | 5 — MCP + agent | 1–2 weeks | Tools callable from Claude Code, write gated by approval |
 | 6 — GraphQL | 1–2 weeks | N+1 measured, an over-budget query refused at zero cost |
+| 7 — Tracing | 1 week | One trace spans gateway → GraphQL → SOAP → Postgres |
 
 Commit at the end of each phase with a README showing how to run it. A reviewer
 should be able to `docker compose up` and hit a working endpoint in under five

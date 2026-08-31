@@ -34,6 +34,10 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-opentelemetry</artifactId>
+		</dependency>
 		<!-- Plain JDBC, not JPA: the schema already exists (you built it in the
 		     database project) and JdbcClient keeps the SQL visible instead of
 		     hiding it behind entity mappings. -->

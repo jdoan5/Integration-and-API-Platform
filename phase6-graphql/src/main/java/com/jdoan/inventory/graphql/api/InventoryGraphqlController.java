@@ -68,6 +68,17 @@ public class InventoryGraphqlController {
      * either a bulk operation upstream, or refusing the query - which is why
      * QueryCostConfig exists. "Add a DataLoader" is the answer to duplication,
      * not to cost.
+     *
+     * THIS LOOP WAS A PARALLEL STREAM UNTIL PHASE 7 TRACED IT. The comment here
+     * claimed the batch ran the fetches concurrently, and the trace showed six
+     * strictly sequential SOAP spans with no pool threads anywhere near them -
+     * `.parallel()` was decoration. It is gone rather than "fixed", because
+     * genuine concurrency here needs an executor AND trace-context propagation
+     * across the thread boundary, and six 3ms calls do not justify either.
+     *
+     * The point worth keeping: a counter said "7 backend calls" and was right,
+     * and the code still described itself incorrectly. Only the waterfall
+     * showed the shape.
      */
     @BatchMapping(typeName = "LowStockItem", field = "product")
     public Map<Types.LowStockItem, Types.Product> lowStockProducts(List<Types.LowStockItem> items) {
@@ -76,7 +87,6 @@ public class InventoryGraphqlController {
                 .collect(Collectors.toSet());
 
         Map<String, Types.Product> bySku = distinctSkus.stream()
-                .parallel()
                 .map(service::getProduct)
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toMap(Types.Product::sku, p -> p));

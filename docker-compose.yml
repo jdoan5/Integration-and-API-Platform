@@ -132,5 +132,32 @@ services:
       retries: 12
       start_period: 20s
 
+  # --------------------------------------------------------------------------
+  # Jaeger - where the traces land (Phase 7).
+  #
+  # Phase 3 added a correlation ID: one value carried across every hop, which
+  # tells you WHICH request you are looking at. It cannot tell you what that
+  # request DID, in what order, or where the time went. A trace is the same idea
+  # with structure - spans, parents, durations - so "the agent's query cost 7
+  # backend calls" stops being a counter and becomes a shape you can look at.
+  #
+  #   16686 = UI
+  #   4317  = OTLP/gRPC     4318 = OTLP/HTTP   (the services export here)
+  # --------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: iap-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:16686/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   redis-data:

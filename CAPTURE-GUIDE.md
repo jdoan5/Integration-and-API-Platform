@@ -5,6 +5,12 @@ Shots for the portfolio page, with the exact command that produces each one.
 **Destination:**
 `jdoan5.github.io/images/Integration & API Platform/Stage N/`
 
+**Status: 19 shots captured** across all six stages, and one per phase is wired
+into the phase cards on `projects-integration.html`. The terminal images were
+produced by running the commands below against the live stack and typesetting
+the real output at 1280x720 — the text in every image is genuine output, not a
+mockup. Browser shots (the WSDL) are direct renders.
+
 **Naming:** `NN_Descriptive Name.png` — two-digit prefix, then a Title Case
 description with spaces. Matches the existing convention used by the other
 project pages.
@@ -216,7 +222,7 @@ Needs the facade on `:8086` and the SOAP service on `:8081`. Kong is optional.
 | `01_Verification Suite Passing.png` | **The strongest shot** — 13 green PASS |
 | `02_The N Plus One, Measured.png` | **The most interview-relevant shot** — 1 call vs 7, same URL |
 | `03_Over Budget Query Refused.png` | Complexity exceeded, and zero backend calls spent |
-| `04_Schema In GraphiQL.png` | The schema browsing its own documentation |
+| `04_The Published Schema.png` | The SDL served by the server that implements it |
 | `05_Invalid Enum Rejected.png` | `WH_NYC` refused at validation — the Phase 5 bug, impossible |
 | `06_Deprecated Not Versioned.png` | `suggestedOrderQty` served and marked deprecated |
 
@@ -245,9 +251,10 @@ curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{
 curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{"query":"{ __type(name:\"LowStockItem\") { fields(includeDeprecated:true) { name isDeprecated deprecationReason } } }"}' | python3 -m json.tool
 ```
 
-**Shot 04** is a browser shot: <http://localhost:8086/graphiql>. Open the Docs
-panel and show a field's description — the point is that the contract documents
-itself, with no separate spec file to drift.
+**Shot 04:** `curl -s localhost:8086/graphql/schema`. The printed SDL is the
+stronger shot — it is the contract itself, including the `@deprecated` reason.
+GraphiQL at <http://localhost:8086/graphiql> makes a good live demo with the
+Docs panel open, but it needs a real click, so it is not scriptable.
 
 **Shot 02 is the one to get right.** Put both numbers in one frame. The whole
 argument of this phase is that `1` and `7` came from the same URL, the same HTTP
@@ -255,10 +262,32 @@ method, and one tick of the same rate limit.
 
 ---
 
+## Stage 7 — Distributed Tracing
+
+Needs Jaeger plus the services on 8081, 8082 and 8086.
+
+| File | What to capture |
+|---|---|
+| `01_One Trace Across The Platform.png` | The verification suite — 7 green PASS |
+| `02_The N Plus One As A Waterfall.png` | **The strongest shot in the project** — 23 spans, the sequential staircase |
+
+```bash
+# 01 — the suite
+./phase7-observability/test-tracing.sh
+```
+
+**Shot 02** is a browser shot of <http://localhost:16686>. Run a nested GraphQL
+query first, then open the newest `graphql-facade` trace. What makes it the best
+image here is that the fan-out is *visibly* a staircase: each SOAP call starts
+after the previous one ends. That is the picture that disproved the code's own
+claim of parallelism, and it needs no caption to read.
+
+---
+
 ## If you only capture six
 
-1. `Stage 4/01_Schema Evolution Rules.png`
-2. `Stage 6/02_The N Plus One, Measured.png`
+1. `Stage 7/02_The N Plus One As A Waterfall.png`
+2. `Stage 4/01_Schema Evolution Rules.png`
 3. `Stage 5/03_Human Approval Before A Write.png`
 4. `Stage 3/01_Gateway Test Suite Passing.png`
 5. `Stage 1/04_Schema Validation Fault.png`

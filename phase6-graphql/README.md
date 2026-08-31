@@ -93,10 +93,15 @@ measured:
 
 - It **removes duplicate work** — the same SKU low in three warehouses is
   fetched once.
-- It **issues the calls from one place**, so they can run in parallel.
+- It **issues the calls from one place** instead of scattering them through the
+  resolution tree, which is what makes them visible as one unit in a trace.
 - It does **not** make an expensive query cheap. The SOAP service has no bulk
   "get these products" operation, so six distinct SKUs still cost six backend
   calls.
+- It does **not** run them concurrently. This loop used a parallel stream and
+  this list used to claim parallelism; Phase 7 traced it and found six strictly
+  sequential spans. The claim was wrong, so the `.parallel()` went rather than
+  the sentence being quietly softened.
 
 Which is the honest reason this phase needs cost analysis *as well*. Batching is
 the answer to duplication; refusing the query is the answer to cost. On this

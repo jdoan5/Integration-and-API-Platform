@@ -6,7 +6,7 @@ streaming with schema governance — all over a real PostgreSQL inventory domain
 
 **Skills:** SOAP · XML Schema (XSD) · service contracts & versioning · Redis ·
 Kong API Gateway · Kafka · Avro · Schema Registry · transactional outbox · CQRS ·
-MCP · LangGraph · Azure OpenAI · GraphQL
+MCP · LangGraph · Azure OpenAI · GraphQL · OpenTelemetry
 
 ---
 
@@ -55,6 +55,7 @@ relay → Kafka → consumers → read model.**
 | [4 — Events](phase4-events/) | Kafka, Avro, Schema Registry, outbox | ✅ Working |
 | [5 — MCP & agent](phase5-mcp-agent/) | MCP, LangGraph, Azure OpenAI | ✅ Working |
 | [6 — GraphQL](phase6-graphql/) | GraphQL, query cost analysis, batching | ✅ Working |
+| [7 — Tracing](phase7-observability/) | OpenTelemetry, Jaeger, context propagation | ✅ Working |
 
 Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 
@@ -103,6 +104,7 @@ Verify the whole chain:
 | 8083 | Events (outbox relay + consumers) |
 | 8084 | MCP server (streamable HTTP) |
 | 8086 | GraphQL facade |
+| 16686 / 4318 | Jaeger UI / OTLP ingest |
 | 9092 / 8085 | Kafka / Schema Registry |
 | 6379 / 5432 | Redis / PostgreSQL |
 
@@ -187,6 +189,22 @@ before each query and read after it. `lowStock { sku }` costs **1** call, adding
 one nested field costs **7**, and a deeper selection is **refused at 0** — all
 three being a single HTTP POST that Kong counts identically.
 
+### [7 — Distributed tracing](phase7-observability/)
+
+OpenTelemetry across every phase, into Jaeger. Phase 3's correlation ID told you
+*which* request you were looking at; a trace tells you what it **did** — the
+order, the nesting, and where the time went.
+
+It immediately repaid the effort twice. It reproduced the repo's oldest bug —
+the trace died at the SOAP hop again, because `WebServiceTemplate` is not
+auto-instrumented — and then it **falsified a claim the code made about
+itself**: Phase 6's batch loader used `.parallel()`, and both the comment and
+the README said the fetches ran concurrently. The waterfall showed six strictly
+sequential spans. The `.parallel()` was deleted rather than the sentence
+softened.
+
+A counter can only confirm what you thought to count.
+
 ---
 
 ## What this project is really about
@@ -240,6 +258,12 @@ about it:
 - **A depth limit that broke the schema browser** while the test suite stayed
   green, because the suite's introspection check was shallower than the one
   GraphiQL actually sends.
+- **A `.parallel()` that never parallelised anything.** The code said the batch
+  fetches ran concurrently; the trace showed six sequential spans and no pool
+  threads. Found only because Phase 7 drew the picture.
+- **A tracing exporter configured with a property Boot 4 ignores.** Boot 3's
+  name produces no warning and no traces — everything starts cleanly and the
+  data simply is not there.
 
 Each is documented as a gotcha in the relevant phase README.
 
