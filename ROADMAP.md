@@ -221,6 +221,41 @@ and the agent last, rather than the other way round.
 
 ---
 
+## Phase 6 — GraphQL facade ✅ *built*
+
+**Directory:** `phase6-graphql/`
+**Skills:** GraphQL, schema design, query cost analysis, DataLoader batching
+
+A sibling of the REST facade over the same SOAP backend — and the phase that
+audits the rest of the project by breaking it.
+
+| Concept | Where it lives |
+|---|---|
+| SDL as contract | `src/main/resources/graphql/inventory.graphqls` |
+| Closed value sets in the schema | `enum MovementType`, `enum WarehouseCode` |
+| Deprecation instead of versioning | `suggestedOrderQty @deprecated` |
+| N+1, measured | `BackendCallCounter` + `/diagnostics/backend-calls` |
+| Batching | `@BatchMapping` on `LowStockItem.product` |
+| Cost analysis | `QueryCostConfig` + `ListAwareComplexityCalculator` |
+| Typed errors without HTTP status | `InventoryExceptionResolver` → `extensions.code` |
+
+**The lesson that matters:** a gateway can only count requests. GraphQL makes
+requests a meaningless unit of cost, so the limit has to move into the server and
+change units — from requests per minute to complexity per query. Kong keeps auth,
+coarse throttling and the correlation ID; it simply cannot do this one.
+
+**Exercises to go further**
+1. **Prove the limit is not theatre.** Set `GRAPHQL_MAX_COMPLEXITY` high, run the
+   deep query, and read `/diagnostics/backend-calls`. Then put it back.
+2. **Break batching on purpose.** Turn `@BatchMapping` into `@SchemaMapping` and
+   watch the call count for a list with repeated SKUs.
+3. **Add field-usage telemetry** so `@deprecated` means something. A deprecated
+   field nobody measures is a field with an apology attached.
+4. **Add persisted queries** — clients send a hash instead of a document, which
+   hands the cost question back to the server and lets a gateway cache again.
+
+---
+
 ## Suggested pace
 
 | Phase | Effort | Ship when |
@@ -230,6 +265,7 @@ and the agent last, rather than the other way round.
 | 3 — Kong | 1 week | Auth + rate limiting + correlation IDs through the whole chain |
 | 4 — Kafka | 2–3 weeks | Events flowing, consumers running, schema evolution demonstrated |
 | 5 — MCP + agent | 1–2 weeks | Tools callable from Claude Code, write gated by approval |
+| 6 — GraphQL | 1–2 weeks | N+1 measured, an over-budget query refused at zero cost |
 
 Commit at the end of each phase with a README showing how to run it. A reviewer
 should be able to `docker compose up` and hit a working endpoint in under five

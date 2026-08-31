@@ -148,16 +148,129 @@ curl -s http://localhost:8085/subjects && curl -s http://localhost:8085/subjects
 
 ---
 
-## If you only capture four
+## Stage 5 — MCP Server & LangGraph Agent
 
-1. `Stage 3/01_Gateway Test Suite Passing.png`
-2. `Stage 4/01_Schema Evolution Rules.png`
-3. `Stage 1/04_Schema Validation Fault.png`
-4. `Stage 2/03_Cache Invalidation On Write.png`
+Run everything from `phase5-mcp-agent/`. All six shots work with **no API key** —
+the scripted offline model drives the real tools, so the plumbing on screen is
+genuine even though the prose is not.
 
-Those four cover all six technologies, and every one shows a **result** rather
-than source code. Screenshots of an IDE prove you have an IDE; screenshots of
-passing assertions prove the system works.
+| File | What to capture |
+|---|---|
+| `01_Verification Suite Passing.png` | **The strongest shot** — 39 offline tests + 8 live checks |
+| `02_The Contract A Model Sees.png` | Tools with annotations, plus resources and prompts |
+| `03_Human Approval Before A Write.png` | **The most interview-relevant shot** — the graph paused mid-tool-call |
+| `04_Idempotent Retry.png` | The same call twice, one database row |
+| `05_Agent Tool Trace.png` | The agent choosing tools against live data |
+| `06_Attached To Claude Code.png` | Claude Code calling these tools directly |
+
+```bash
+# 01 — the whole suite, offline guards and live platform
+./phase5-mcp-agent/verify.sh
+```
+
+```bash
+# 02 — the contract, rendered from the tool functions themselves
+cd phase5-mcp-agent && ./.venv/bin/python contract.py
+```
+
+```bash
+# 03 — answer N. The write is refused and the stock does not move.
+cd phase5-mcp-agent && ./.venv/bin/python -m agent.cli "record 5 units OUT of ELEC-LAP-001 at WH-EAST"
+```
+
+```bash
+# 04 — identical calls collapse to one movement; the second says replayed: true
+cd phase5-mcp-agent && ./.venv/bin/python live_check.py && ./verify.sh 2>&1 | grep -A1 replayed
+```
+
+```bash
+# 05 — the trace, on live data
+cd phase5-mcp-agent && ./.venv/bin/python -m agent.cli "what needs restocking?"
+```
+
+**Shot 03 is the one to get right.** The approval banner prints the full
+arguments and the graph is genuinely suspended underneath it — answering `N`
+returns a refusal the model then explains, and the database is untouched. Show
+the `[y/N]` prompt itself, not just the outcome.
+
+**Shot 06** needs no command. Register the server, then ask Claude Code
+*"which SKUs are below their reorder point?"* and capture it calling the tools:
+
+```bash
+cd phase5-mcp-agent && claude mcp add inventory -- $(pwd)/.venv/bin/python -m inventory_mcp
+```
+
+**Note on re-runs:** `verify.sh` records one real `ADJUSTMENT` of 1 unit per run,
+and shot 03 moves 5 units if you answer `Y`. Both are deliberate — a write that
+left no trace would not be proving anything — but the numbers on screen will
+differ from the ones in this guide.
+
+---
+
+## Stage 6 — GraphQL Facade
+
+Needs the facade on `:8086` and the SOAP service on `:8081`. Kong is optional.
+
+| File | What to capture |
+|---|---|
+| `01_Verification Suite Passing.png` | **The strongest shot** — 13 green PASS |
+| `02_The N Plus One, Measured.png` | **The most interview-relevant shot** — 1 call vs 7, same URL |
+| `03_Over Budget Query Refused.png` | Complexity exceeded, and zero backend calls spent |
+| `04_Schema In GraphiQL.png` | The schema browsing its own documentation |
+| `05_Invalid Enum Rejected.png` | `WH_NYC` refused at validation — the Phase 5 bug, impossible |
+| `06_Deprecated Not Versioned.png` | `suggestedOrderQty` served and marked deprecated |
+
+```bash
+# 01 — the whole suite
+./phase6-graphql/test-graphql.sh
+```
+
+```bash
+# 02 — the measurement. Reset, run cheap, read; reset, run nested, read.
+curl -s -X DELETE localhost:8086/diagnostics/backend-calls >/dev/null && curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{"query":"{ lowStock { sku quantity } }"}' >/dev/null && echo "cheap:     $(curl -s localhost:8086/diagnostics/backend-calls)" && curl -s -X DELETE localhost:8086/diagnostics/backend-calls >/dev/null && curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{"query":"{ lowStock { sku quantity product { name reorderQuantity } } }"}' >/dev/null && echo "one field more: $(curl -s localhost:8086/diagnostics/backend-calls)"
+```
+
+```bash
+# 03 — refused before execution, so it costs nothing
+curl -s -X DELETE localhost:8086/diagnostics/backend-calls >/dev/null && curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{"query":"{ lowStock { sku product { name stockLevels { warehouseCode quantity } } } }"}' | python3 -m json.tool && echo "backend calls spent: $(curl -s localhost:8086/diagnostics/backend-calls)"
+```
+
+```bash
+# 05 — the value set is in the contract, so this is a query error
+curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{"query":"{ lowStock(warehouse: WH_NYC) { sku } }"}' | python3 -m json.tool
+```
+
+```bash
+# 06 — deprecated, still served, and discoverable by introspection
+curl -s -X POST localhost:8086/graphql -H 'Content-Type: application/json' -d '{"query":"{ __type(name:\"LowStockItem\") { fields(includeDeprecated:true) { name isDeprecated deprecationReason } } }"}' | python3 -m json.tool
+```
+
+**Shot 04** is a browser shot: <http://localhost:8086/graphiql>. Open the Docs
+panel and show a field's description — the point is that the contract documents
+itself, with no separate spec file to drift.
+
+**Shot 02 is the one to get right.** Put both numbers in one frame. The whole
+argument of this phase is that `1` and `7` came from the same URL, the same HTTP
+method, and one tick of the same rate limit.
+
+---
+
+## If you only capture six
+
+1. `Stage 4/01_Schema Evolution Rules.png`
+2. `Stage 6/02_The N Plus One, Measured.png`
+3. `Stage 5/03_Human Approval Before A Write.png`
+4. `Stage 3/01_Gateway Test Suite Passing.png`
+5. `Stage 1/04_Schema Validation Fault.png`
+6. `Stage 2/03_Cache Invalidation On Write.png`
+
+Those six cover every technology in the project, and each one shows a
+**result** rather than source code. Screenshots of an IDE prove you have an IDE;
+screenshots of passing assertions prove the system works.
+
+The first three are the ones that start a conversation: a registry refusing a
+breaking change, a gateway that cannot see a 7x cost difference, and an agent
+stopped mid-write waiting for a human.
 
 ## Before capturing
 
@@ -167,7 +280,10 @@ Everything must be running:
 docker compose up -d redis kong kafka schema-registry
 ```
 
-Plus PostgreSQL and the three services on 8081, 8082, 8083.
+Plus PostgreSQL and the services on 8081, 8082, 8083 and 8086. Phase 5 needs no
+extra process for shots 01-05 — the agent spawns the MCP server over stdio
+itself. Only a remote client needs `./.venv/bin/python -m inventory_mcp --http`
+on 8084.
 
 ## Sizing
 

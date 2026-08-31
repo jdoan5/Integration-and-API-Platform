@@ -162,6 +162,14 @@ turns an infrastructure failure into a predictable agent behaviour.
 - **`create_react_agent` is deprecated.** LangGraph 1.0 moved it to
   `langchain.agents.create_agent`, and the parameter renamed from `prompt` to
   `system_prompt`. Tutorial code written a year ago compiles and warns.
+- **A warehouse that does not exist returns `200 []`, not `404`.** Only found by
+  running against real data. An empty array is indistinguishable from "stocked
+  here, quantity zero" — a genuine zero row *does* come back populated — so
+  passing it through made the agent report *"no stock at WH-NYC"* about a
+  warehouse that isn't real. A silent wrong answer is worse than an error, so
+  `get_stock` raises one naming both possibilities. A malformed SKU on that same
+  path returns `502` and an unknown SKU returns `404`: three different failures,
+  three different shapes, on one endpoint.
 - **`mcp` 2.x exists, and this pins to 1.x on purpose.** The v2 SDK renamed
   `FastMCP` to `MCPServer` and *removed* `mcp.server.fastmcp`, so 2.x is an
   import error here — and `langchain-mcp-adapters` pins `mcp<2` regardless. The

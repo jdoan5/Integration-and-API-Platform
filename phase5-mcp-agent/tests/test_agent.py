@@ -153,3 +153,45 @@ class TestOfflineModel:
         ])
         assert not response.tool_calls
         assert "reorderPoint 40" in response.content
+
+
+class TestOfflineWriteIntent:
+    """The scripted model may only write when the instruction is unambiguous.
+
+    A stand-in that guesses a warehouse would be demonstrating the exact
+    failure this phase is about, on the one tool that writes to the database.
+    """
+
+    def test_a_complete_instruction_is_parsed(self):
+        from agent.llm import _write_intent
+
+        assert _write_intent("record 5 units OUT of ELEC-LAP-001 at WH-EAST") == {
+            "sku": "ELEC-LAP-001",
+            "warehouse_code": "WH-EAST",
+            "movement_type": "OUT",
+            "quantity": 5,
+        }
+
+    def test_quantity_is_not_taken_from_the_sku_digits(self):
+        """ELEC-LAP-001 ends in digits; the quantity must not become 001."""
+        from agent.llm import _write_intent
+
+        assert _write_intent("record 12 IN for ELEC-LAP-001 at WH-WEST")["quantity"] == 12
+
+    def test_a_missing_warehouse_refuses_rather_than_guesses(self):
+        from agent.llm import _write_intent
+
+        assert _write_intent("record 5 units OUT of ELEC-LAP-001") is None
+
+    def test_a_read_question_is_never_a_write(self):
+        from agent.llm import _write_intent
+
+        assert _write_intent("why is ELEC-LAP-001 low at WH-EAST?") is None
+
+    def test_the_model_checks_stock_before_it_writes(self):
+        """Same order the system prompt asks a real model to follow."""
+        model = OfflineChatModel().bind_tools(
+            [type("T", (), {"name": n})() for n in ("get_stock", "record_movement")]
+        )
+        first = model.invoke([HumanMessage("record 5 units OUT of ELEC-LAP-001 at WH-EAST")])
+        assert first.tool_calls[0]["name"] == "get_stock"

@@ -114,22 +114,45 @@ class TestArgumentValidation:
         assert not route.called
 
     @respx.mock
-    async def test_a_wellformed_but_unknown_warehouse_is_NOT_blocked(self):
+    async def test_a_wellformed_but_unknown_warehouse_reaches_the_facade(self):
         """WH-NYC matches the pattern, so the server must not invent an allowlist.
 
         The database owns which warehouses exist; hardcoding the set here would
-        go stale the day one is added. The vocabulary resource steers the model,
-        and a genuinely unknown code comes back as a 404 the model can read.
+        go stale the day one is added.
         """
         route = respx.get(f"{settings.rest_root}/stock/ELEC-LAP-001").mock(
-            return_value=httpx.Response(404)
+            return_value=httpx.Response(200, json=[])
+        )
+        async with create_connected_server_and_client_session(mcp) as session:
+            await session.call_tool("get_stock", {"sku": "ELEC-LAP-001", "warehouse": "WH-NYC"})
+        assert route.called, "the server second-guessed the database"
+
+    @respx.mock
+    async def test_an_empty_result_for_a_warehouse_is_not_reported_as_no_stock(self):
+        """Verified against the live facade: an unknown warehouse returns 200 [],
+        NOT 404. Passing that through as an empty list makes a model say
+        "no stock at WH-NYC" about a warehouse that does not exist."""
+        respx.get(f"{settings.rest_root}/stock/ELEC-LAP-001").mock(
+            return_value=httpx.Response(200, json=[])
         )
         async with create_connected_server_and_client_session(mcp) as session:
             result = await session.call_tool(
                 "get_stock", {"sku": "ELEC-LAP-001", "warehouse": "WH-NYC"}
             )
-        assert route.called, "the server second-guessed the database"
-        assert result.isError and "No such record" in _text(result)
+        assert result.isError
+        body = _text(result)
+        assert all(w in body for w in KNOWN_WAREHOUSES)
+        assert "without the warehouse filter" in body
+
+    @respx.mock
+    async def test_an_empty_result_with_no_filter_is_still_a_valid_answer(self):
+        """Only the filtered case is ambiguous - do not break the unfiltered one."""
+        respx.get(f"{settings.rest_root}/stock/ELEC-LAP-001").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        async with create_connected_server_and_client_session(mcp) as session:
+            result = await session.call_tool("get_stock", {"sku": "ELEC-LAP-001"})
+        assert not result.isError
 
 
 class TestIdempotencyEndToEnd:

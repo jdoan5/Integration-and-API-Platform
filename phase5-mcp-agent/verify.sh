@@ -10,6 +10,13 @@
 # That split is the point. The contract, the annotations and the guards are
 # properties of this phase and are testable on their own; only the data needs
 # the rest of the stack.
+#
+# NOTE ON RE-RUNS: section 4 records a real ADJUSTMENT of 1 unit, and its
+# Idempotency-Key is unique per run ($$), so every run adds one movement to the
+# ledger. That is deliberate - a key reused across runs would prove replay
+# rather than the write. Same trade-off as test-gateway.sh and the rate limit:
+# a test that exercises a stateful system is not free of side effects, and
+# pretending otherwise is how you get a suite that lies.
 # ============================================================================
 set -uo pipefail
 
@@ -120,6 +127,19 @@ else
     echo "$R2" | grep -q '"replayed":true' \
         && pass "a replayed write returns the first result instead of moving stock twice" \
         || fail "replay was not detected - a model retry would double-count stock"
+
+    # Three different failure shapes on ONE endpoint - only visible live.
+    UNKNOWN_WH=$(curl -s -H "apikey: $KEY" "$PROXY/api/v1/stock/ELEC-LAP-001?warehouse=WH-NYC")
+    [ "$UNKNOWN_WH" = "[]" ] \
+        && pass "an unknown warehouse returns 200 [] - which is why the tool raises" \
+        || fail "expected 200 [] for an unknown warehouse, got '$UNKNOWN_WH'"
+
+    BAD_SKU=$(curl -s -o /dev/null -w '%{http_code}' -H "apikey: $KEY" "$PROXY/api/v1/stock/not-a-sku")
+    [ "$BAD_SKU" = "502" ] \
+        && pass "a malformed SKU on /stock returns 502 (that path has no validation)" \
+        || fail "expected 502 for a malformed SKU, got $BAD_SKU"
+
+    $PY live_check.py || FAILED=1
 
     echo "  Now ask the agent something:"
     echo "    ./.venv/bin/python -m agent.cli 'what needs restocking?'"

@@ -157,7 +157,22 @@ async def get_stock(sku: str, ctx: Context, warehouse: str | None = None) -> lis
     _check_sku(sku)
     if warehouse:
         _check_warehouse(warehouse)
-    return await _ctx(ctx).client.get_stock(sku, warehouse)
+
+    levels = await _ctx(ctx).client.get_stock(sku, warehouse)
+
+    # An unknown warehouse returns 200 [] rather than 404, which is
+    # indistinguishable from "stocked here, quantity zero" - a stock row with
+    # quantity 0 really does come back populated. Handing a model a bare []
+    # makes it report "no stock at WH-NYC" for a warehouse that does not exist.
+    # An error naming both possibilities is the only answer that is not
+    # silently wrong.
+    if warehouse and not levels:
+        raise InventoryError(
+            f"No stock rows for {sku} at {warehouse}. Either {warehouse} is not a warehouse "
+            f"(the ones that exist are {', '.join(KNOWN_WAREHOUSES)}), or this product is not "
+            f"stocked there. Call get_stock without the warehouse filter to see where it is."
+        )
+    return levels
 
 
 @mcp.tool(

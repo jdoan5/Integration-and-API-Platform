@@ -23,6 +23,43 @@ from pydantic import Field
 from inventory_mcp.config import settings
 
 SKU_RE = re.compile(r"\b[A-Z]{3,4}-[A-Z0-9]{3,5}-?[0-9]{0,5}\b")
+WAREHOUSE_RE = re.compile(r"\bWH-[A-Z]{2,4}\b")
+QUANTITY_RE = re.compile(r"\b(\d{1,6})\b")
+MOVEMENT_RE = re.compile(
+    r"\b(TRANSFER_IN|TRANSFER_OUT|ADJUSTMENT|RETURN|IN|OUT)\b", re.IGNORECASE
+)
+WRITE_VERBS = ("record", "log a", "write", "book ", "receive", "ship")
+
+
+def _write_intent(question: str) -> dict[str, Any] | None:
+    """Extract a movement from a plain-English instruction, or return None.
+
+    Deliberately strict: every field must be present and explicit. A scripted
+    model that *guesses* a warehouse would be demonstrating the exact failure
+    this phase is about, on the one tool that writes to the database.
+    """
+    if not any(verb in question.lower() for verb in WRITE_VERBS):
+        return None
+
+    sku = SKU_RE.search(question)
+    warehouse = WAREHOUSE_RE.search(question)
+    movement = MOVEMENT_RE.search(question)
+    if not (sku and warehouse and movement):
+        return None
+
+    # Take a number that is not part of the SKU or the warehouse code.
+    remainder = question.replace(sku.group(0), " ").replace(warehouse.group(0), " ")
+    quantity = QUANTITY_RE.search(remainder)
+    if not quantity:
+        return None
+
+    return {
+        "sku": sku.group(0),
+        "warehouse_code": warehouse.group(0),
+        "movement_type": movement.group(0).upper(),
+        "quantity": int(quantity.group(1)),
+    }
+
 
 
 def _text_of(message: ToolMessage) -> str:
@@ -83,11 +120,20 @@ class OfflineChatModel(BaseChatModel):
         completed = sum(1 for m in messages if isinstance(m, ToolMessage))
 
         plan: list[tuple[str, dict[str, Any]]] = []
-        if sku and "get_product" in self.tool_names:
+        intent = _write_intent(str(question))
+        if intent and "record_movement" in self.tool_names:
+            # Check the product exists before writing against it - the same
+            # order the system prompt asks a real model to follow.
+            if "get_stock" in self.tool_names:
+                plan.append(("get_stock", {"sku": intent["sku"]}))
+            plan.append(("record_movement", intent))
+        elif sku and "get_product" in self.tool_names:
             plan.append(("get_product", {"sku": sku}))
-        if sku and "get_stock" in self.tool_names:
+            if "get_stock" in self.tool_names:
+                plan.append(("get_stock", {"sku": sku}))
+        elif sku and "get_stock" in self.tool_names:
             plan.append(("get_stock", {"sku": sku}))
-        if not sku and "list_low_stock" in self.tool_names:
+        elif "list_low_stock" in self.tool_names:
             plan.append(("list_low_stock", {}))
 
         if completed < len(plan):

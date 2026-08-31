@@ -6,7 +6,7 @@ streaming with schema governance — all over a real PostgreSQL inventory domain
 
 **Skills:** SOAP · XML Schema (XSD) · service contracts & versioning · Redis ·
 Kong API Gateway · Kafka · Avro · Schema Registry · transactional outbox · CQRS ·
-MCP · LangGraph · Azure OpenAI
+MCP · LangGraph · Azure OpenAI · GraphQL
 
 ---
 
@@ -28,6 +28,9 @@ flowchart LR
 
     Agent -->|stdio / HTTP| MCP
     MCP -->|apikey| Kong
+    GQL["GraphQL Facade<br/>cost analysis"]
+    Client -->|apikey| GQL
+    GQL --> SOAP
     Client -->|apikey| Kong
     Kong --> REST
     Kong -->|/soap| SOAP
@@ -51,6 +54,7 @@ relay → Kafka → consumers → read model.**
 | [3 — API gateway](phase3-gateway/) | Kong: auth, rate limiting, tracing | ✅ Working |
 | [4 — Events](phase4-events/) | Kafka, Avro, Schema Registry, outbox | ✅ Working |
 | [5 — MCP & agent](phase5-mcp-agent/) | MCP, LangGraph, Azure OpenAI | ✅ Working |
+| [6 — GraphQL](phase6-graphql/) | GraphQL, query cost analysis, batching | ✅ Working |
 
 Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 
@@ -98,6 +102,7 @@ Verify the whole chain:
 | 8082 | REST facade |
 | 8083 | Events (outbox relay + consumers) |
 | 8084 | MCP server (streamable HTTP) |
+| 8086 | GraphQL facade |
 | 9092 / 8085 | Kafka / Schema Registry |
 | 6379 / 5432 | Redis / PostgreSQL |
 
@@ -168,6 +173,20 @@ endpoint twice. Every guard already in this repo held it, unchanged.
 
 Runs with no credentials — a scripted offline model still drives the real tools.
 
+### [6 — GraphQL facade](phase6-graphql/)
+
+The phase where three things the platform relied on stop working. Moving query
+composition from the server to the client breaks **URL-based caching** (one URL,
+and the shape varies per caller), **request-counting rate limits** (one query
+can cost 1 backend call or 50), and **versioning** (GraphQL has none). Each
+needs a different replacement, and reaching for the wrong one is how teams end
+up with all three and none of them working.
+
+The numbers are measured rather than claimed: a backend-call counter is reset
+before each query and read after it. `lowStock { sku }` costs **1** call, adding
+one nested field costs **7**, and a deeper selection is **refused at 0** — all
+three being a single HTTP POST that Kong counts identically.
+
 ---
 
 ## What this project is really about
@@ -205,6 +224,16 @@ about it:
 - **An MCP server that bound on top of the gateway.** FastMCP defaults to port
   8000, which is Kong's proxy port here, so every tool call went to Kong's
   router and 404'd.
+- **A warehouse that does not exist returns `200 []`, not `404`** — and an empty
+  array is indistinguishable from "stocked here, quantity zero". The agent
+  reported "no stock at WH-NYC" about a warehouse that was never real. Phase 6
+  makes that mistake impossible by putting the value set in the schema.
+- **A GraphQL complexity limit that protected nothing.** The default calculator
+  scores fields in the document, so a narrow selection over a 600-row list rated
+  the same as one row — the exact query that hurts, scored as cheap.
+- **Kong's config validator crashed inside its own error reporter**, printing
+  `attempt to concatenate local 'k'` and nothing about the plugin pointing at a
+  service that did not exist.
 
 Each is documented as a gotcha in the relevant phase README.
 

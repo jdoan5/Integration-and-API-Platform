@@ -34,6 +34,25 @@ services:
         strip_path: false          # upstream already expects /api/v1/...
         methods: [GET, POST, DELETE, OPTIONS]
 
+  # --- The GraphQL facade from Phase 6 ---------------------------------------
+  # Same treatment as the REST facade: auth and coarse throttling at the edge.
+  # What the gateway CANNOT do here is judge COST - every GraphQL request is one
+  # POST to one path, so the rate limit below counts a one-call query and a
+  # fifty-call query identically. That is why Phase 6 runs its own complexity
+  # limit in the application; see phase6-graphql QueryCostConfig.
+  - name: graphql-facade
+    url: http://host.docker.internal:8086
+    retries: 3
+    connect_timeout: 5000
+    read_timeout: 15000          # a legitimate deep query is slower than a REST call
+    routes:
+      - name: graphql-api
+        paths:
+          - /graphql
+        strip_path: false        # the upstream serves /graphql itself
+        methods: [POST, GET, OPTIONS]
+
+
   # --- The SOAP service from Phase 1 ----------------------------------------
   # A gateway is not "the REST gateway" - it fronts whatever speaks HTTP.
   # Putting the legacy SOAP endpoint behind the SAME gateway means auth,
@@ -146,6 +165,29 @@ plugins:
           # leading space. Easy to miss, and it breaks exact-match consumers.
           - "X-Gateway:kong"
           - "X-Served-By:integration-platform"
+
+  # --- Authentication on the GraphQL API ------------------------------------
+  - name: key-auth
+    service: graphql-facade
+    config:
+      key_names: [apikey]
+      hide_credentials: true
+
+  # --- Rate limiting the GraphQL API ----------------------------------------
+  # Deliberately the same 20/minute as REST, and deliberately NOT enough on its
+  # own. Two consumers inside this quota can cost the backend wildly different
+  # amounts. The gateway sets the floor; the server sets the ceiling.
+  - name: rate-limiting
+    service: graphql-facade
+    config:
+      minute: 20
+      policy: redis
+      redis:
+        host: redis
+        port: 6379
+        database: 1
+      fault_tolerant: true
+      hide_client_headers: false
 
   # --- SOAP route: rate limit only, no key-auth -----------------------------
   # Deliberate asymmetry. Legacy SOAP consumers cannot be asked to add an API

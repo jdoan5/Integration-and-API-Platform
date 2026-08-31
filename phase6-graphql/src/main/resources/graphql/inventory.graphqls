@@ -1,0 +1,146 @@
+# ============================================================================
+# THE GRAPHQL CONTRACT - the fifth one in this project, and the first with no
+# version number anywhere in it.
+#
+#   XSD (Phase 1)      versioned by namespace          .../inventory/v1
+#   OpenAPI (Phase 2)  versioned by URL path           /api/v1/...
+#   Avro (Phase 4)     versioned by registry subject   ...-value/versions/2
+#   MCP (Phase 5)      versioned by tool signature
+#   GraphQL            NOT VERSIONED AT ALL
+#
+# GraphQL's answer to change is @deprecated plus field-usage tracking: you keep
+# serving the old field until telemetry says nobody asks for it, then delete it.
+# That only works if you actually measure. A @deprecated field nobody tracks is
+# just a field with an apology attached.
+# ============================================================================
+
+type Query {
+    "One product by SKU. Null when no such SKU exists - absence is not an error."
+    product(sku: ID!): Product
+
+    """
+    Everything at or below its reorder point.
+
+    Note there is no `first`/`after` here. Pagination is deliberately omitted so
+    the cost-analysis lesson has something to bite on: this list is unbounded,
+    and combined with nested fields that is exactly how a client accidentally
+    writes an expensive query.
+    """
+    lowStock(warehouse: WarehouseCode, limit: Int = 50): [LowStockItem!]!
+}
+
+type Mutation {
+    """
+    Record a physical stock movement. Writes to the database.
+
+    Takes an idempotencyKey because the REST facade beneath it does. GraphQL has
+    no equivalent of an HTTP header convention, so what was transport metadata in
+    Phase 2 has to become part of the schema here - a real cost of moving a
+    contract between protocols.
+    """
+    recordMovement(input: MovementInput!): MovementResult!
+}
+
+type Product {
+    sku: ID!
+    name: String!
+    description: String
+    category: String
+    unitPrice: Float!
+    unitCost: Float!
+    reorderPoint: Int!
+    reorderQuantity: Int!
+    active: Boolean!
+
+    """
+    Stock for this product, per warehouse.
+
+    THIS FIELD IS THE N+1. Resolving it needs a separate backend call per
+    product, so `lowStock { product { stockLevels } }` fans out. It is batched -
+    see StockLevelBatchLoader - and test-graphql.sh prints the call count with
+    and without batching rather than asserting the fix in prose.
+    """
+    stockLevels(warehouse: WarehouseCode): [StockLevel!]!
+}
+
+type StockLevel {
+    sku: ID!
+    productName: String!
+    warehouseCode: WarehouseCode!
+    warehouseName: String!
+    quantity: Int!
+    reorderPoint: Int!
+    belowReorderPoint: Boolean!
+}
+
+type LowStockItem {
+    sku: ID!
+    productName: String!
+    warehouseCode: WarehouseCode!
+    quantity: Int!
+    reorderPoint: Int!
+    "How far below the reorder point this is."
+    deficit: Int!
+
+    suggestedOrderQty: Int! @deprecated(
+        reason: "Duplicates Product.reorderQuantity, which is the field of record. Select `product { reorderQuantity }` instead. Scheduled for removal once field-usage telemetry shows no callers."
+    )
+
+    """
+    The full product record.
+
+    Selecting this turns one backend call into one-per-item. That is not a bug
+    to hide - it is the honest cost of letting the client choose the shape, and
+    the reason this phase needs cost analysis rather than request counting.
+    """
+    product: Product
+}
+
+input MovementInput {
+    sku: ID!
+    warehouseCode: WarehouseCode!
+    movementType: MovementType!
+    quantity: Int!
+    referenceType: String
+    notes: String
+    """
+    Supply a stable value to make a retry safe. Same key, same logical movement:
+    the second call returns the first result with replayed = true.
+    """
+    idempotencyKey: String
+}
+
+type MovementResult {
+    movementId: ID!
+    sku: ID!
+    warehouseCode: WarehouseCode!
+    quantityBefore: Int!
+    quantityAfter: Int!
+    delta: Int!
+    recordedAt: String!
+    replayed: Boolean!
+}
+
+"""
+The closed set from the Phase 1 XSD, restated as an enum.
+
+A String here would push validation to runtime; an enum makes an invalid value a
+*query validation* error, rejected before a single resolver runs - the same
+boundary-validation idea as the XSD's xs:enumeration, enforced by a different
+runtime.
+"""
+enum MovementType {
+    IN
+    OUT
+    TRANSFER_IN
+    TRANSFER_OUT
+    ADJUSTMENT
+    RETURN
+}
+
+"The warehouses that exist, not the pattern that would match one."
+enum WarehouseCode {
+    WH_WEST
+    WH_CENT
+    WH_EAST
+}

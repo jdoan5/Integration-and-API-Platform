@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================================
+  inventory-v1.xsd  -  THE CONTRACT.
+
+  This file is hand-written FIRST. Everything else is derived from it:
+    * JAXB generates the Java request/response classes  (jaxb2-maven-plugin)
+    * Spring-WS generates the WSDL at runtime           (DefaultWsdl11Definition)
+
+  That is what "contract-first" means: the schema is the source of truth and
+  the Java code is an implementation detail. The opposite ("code-first") lets
+  Java classes dictate the wire format, which makes the contract accidental
+  and painful to keep stable for consumers.
+
+  XSD concepts demonstrated below, in order of appearance:
+    targetNamespace / elementFormDefault  - namespace hygiene
+    xs:simpleType + xs:restriction        - reusable constrained scalars
+    xs:pattern                            - regex validation (SKU format)
+    xs:enumeration                        - closed value sets
+    xs:complexType + xs:sequence          - ordered structures
+    minOccurs / maxOccurs                 - optionality and repetition
+    xs:element ref + inline types         - composition styles
+  ============================================================================
+-->
+<xs:schema
+        xmlns:xs="http://www.w3.org/2001/XMLSchema"
+        xmlns:inv="http://jdoan.com/inventory/v1"
+        targetNamespace="http://jdoan.com/inventory/v1"
+        elementFormDefault="qualified">
+
+    <!-- ======================================================================
+         1. SIMPLE TYPES  -  named, reusable, constrained scalars.
+
+         Defining these once and referencing them everywhere is the XSD
+         equivalent of a domain type. A consumer sending "abc" as a SkuType
+         is rejected by the schema validator BEFORE your Java code ever runs.
+         ====================================================================== -->
+
+    <!-- SKU must look like ELEC-LAP-001 or GEN-00042 -->
+    <xs:simpleType name="SkuType">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[A-Z]{3,4}-[A-Z0-9]{3,5}-?[0-9]{0,5}"/>
+            <xs:minLength value="3"/>
+            <xs:maxLength value="40"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Warehouse codes: WH-WEST, WH-CENT, WH-EAST, WH-NW, WH-SE, WH-SW -->
+    <xs:simpleType name="WarehouseCodeType">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="WH-[A-Z]{2,4}"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Closed value set. Mirrors the movement_type_enum in the Postgres DB.
+         Adding a value here is a BREAKING change for strict consumers - which
+         is exactly the versioning lesson this schema is here to teach. -->
+    <xs:simpleType name="MovementTypeType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="IN"/>
+            <xs:enumeration value="OUT"/>
+            <xs:enumeration value="TRANSFER_IN"/>
+            <xs:enumeration value="TRANSFER_OUT"/>
+            <xs:enumeration value="ADJUSTMENT"/>
+            <xs:enumeration value="RETURN"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!-- Quantities are strictly positive. xs:int would allow -5. -->
+    <xs:simpleType name="PositiveQuantityType">
+        <xs:restriction base="xs:int">
+            <xs:minExclusive value="0"/>
+            <xs:maxInclusive value="1000000"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+
+    <!-- ======================================================================
+         2. COMPLEX TYPES  -  the shared payload shapes.
+         ====================================================================== -->
+
+    <xs:complexType name="ProductType">
+        <xs:sequence>
+            <xs:element name="sku"             type="inv:SkuType"/>
+            <xs:element name="name"            type="xs:string"/>
+            <!-- minOccurs="0" = optional. Consumers must tolerate its absence. -->
+            <xs:element name="description"     type="xs:string"   minOccurs="0"/>
+            <xs:element name="category"        type="xs:string"   minOccurs="0"/>
+            <xs:element name="unitPrice"       type="xs:decimal"/>
+            <xs:element name="unitCost"        type="xs:decimal"/>
+            <xs:element name="reorderPoint"    type="xs:int"/>
+            <xs:element name="reorderQuantity" type="xs:int"/>
+            <xs:element name="active"          type="xs:boolean"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="StockLevelType">
+        <xs:sequence>
+            <xs:element name="sku"           type="inv:SkuType"/>
+            <xs:element name="productName"   type="xs:string"/>
+            <xs:element name="warehouseCode" type="inv:WarehouseCodeType"/>
+            <xs:element name="warehouseName" type="xs:string"/>
+            <xs:element name="quantity"      type="xs:int"/>
+            <xs:element name="reorderPoint"  type="xs:int"/>
+            <xs:element name="lastUpdated"   type="xs:dateTime" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="LowStockItemType">
+        <xs:sequence>
+            <xs:element name="sku"               type="inv:SkuType"/>
+            <xs:element name="productName"       type="xs:string"/>
+            <xs:element name="warehouseCode"     type="inv:WarehouseCodeType"/>
+            <xs:element name="quantity"          type="xs:int"/>
+            <xs:element name="reorderPoint"      type="xs:int"/>
+            <xs:element name="deficit"           type="xs:int"/>
+            <xs:element name="suggestedOrderQty" type="xs:int"/>
+        </xs:sequence>
+    </xs:complexType>
+
+
+    <!-- ======================================================================
+         3. OPERATION 1  -  GetProduct  (simple read by key)
+         ====================================================================== -->
+    <xs:element name="GetProductRequest">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="sku" type="inv:SkuType"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+    <xs:element name="GetProductResponse">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="product" type="inv:ProductType"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+
+    <!-- ======================================================================
+         4. OPERATION 2  -  GetStockLevel  (read across two keys)
+
+         warehouseCode is OPTIONAL. Omit it and you get every warehouse;
+         supply it and you get one. maxOccurs="unbounded" makes the response
+         a list - note that a single-element list and an empty list are both
+         valid, which is what lets one operation serve both shapes.
+         ====================================================================== -->
+    <xs:element name="GetStockLevelRequest">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="sku"           type="inv:SkuType"/>
+                <xs:element name="warehouseCode" type="inv:WarehouseCodeType" minOccurs="0"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+    <xs:element name="GetStockLevelResponse">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="stockLevel" type="inv:StockLevelType"
+                            minOccurs="0" maxOccurs="unbounded"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+
+    <!-- ======================================================================
+         5. OPERATION 3  -  ListLowStock  (the reorder report)
+
+         Reuses the v_low_stock_items view from the database project.
+         ====================================================================== -->
+    <xs:element name="ListLowStockRequest">
+        <xs:complexType>
+            <xs:sequence>
+                <!-- Optional filter: restrict the report to one warehouse. -->
+                <xs:element name="warehouseCode" type="inv:WarehouseCodeType" minOccurs="0"/>
+                <xs:element name="maxResults"    type="xs:int"                minOccurs="0"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+    <xs:element name="ListLowStockResponse">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="item"       type="inv:LowStockItemType"
+                            minOccurs="0" maxOccurs="unbounded"/>
+                <xs:element name="totalCount" type="xs:int"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+
+    <!-- ======================================================================
+         6. OPERATION 4  -  RecordStockMovement  (a WRITE)
+
+         This is the interesting one. It inserts into stock_movements, and the
+         database trigger you built in 05_triggers.sql then updates
+         stock_levels automatically. The SOAP response reports the NEW
+         quantity - proving the trigger fired, end to end, through the
+         service contract.
+         ====================================================================== -->
+    <xs:element name="RecordStockMovementRequest">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="sku"           type="inv:SkuType"/>
+                <xs:element name="warehouseCode" type="inv:WarehouseCodeType"/>
+                <xs:element name="movementType"  type="inv:MovementTypeType"/>
+                <xs:element name="quantity"      type="inv:PositiveQuantityType"/>
+                <xs:element name="referenceType" type="xs:string" minOccurs="0"/>
+                <xs:element name="notes"         type="xs:string" minOccurs="0"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+    <xs:element name="RecordStockMovementResponse">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="movementId"     type="xs:long"/>
+                <xs:element name="sku"            type="inv:SkuType"/>
+                <xs:element name="warehouseCode"  type="inv:WarehouseCodeType"/>
+                <xs:element name="quantityBefore" type="xs:int"/>
+                <xs:element name="quantityAfter"  type="xs:int"/>
+                <xs:element name="recordedAt"     type="xs:dateTime"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+
+    <!-- ======================================================================
+         7. FAULT DETAIL  -  structured errors.
+
+         A SOAP Fault has a standard envelope (faultcode/faultstring), but the
+         <detail> element is yours to define. Putting a SCHEMA on it means
+         consumers can parse your errors programmatically instead of
+         string-matching a message. This is a real service-contract practice
+         that most tutorials skip.
+         ====================================================================== -->
+    <xs:element name="InventoryError">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="code"      type="xs:string"/>
+                <xs:element name="message"   type="xs:string"/>
+                <xs:element name="field"     type="xs:string" minOccurs="0"/>
+                <xs:element name="timestamp" type="xs:dateTime"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+</xs:schema>
