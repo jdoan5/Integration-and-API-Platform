@@ -57,6 +57,9 @@ relay → Kafka → consumers → read model.**
 | [6 — GraphQL](phase6-graphql/) | GraphQL, query cost analysis, batching | ✅ Working |
 | [7 — Tracing](phase7-observability/) | OpenTelemetry, Jaeger, context propagation | ✅ Working |
 
+**Try the GraphQL layer without installing anything:** [live GraphiQL](https://inventory-graphql-demo-ihnb3flw5a-uc.a.run.app/graphiql?path=/graphql) — a read-only build of Phase 6 with a
+snapshot of the inventory data. Same schema, same cost analysis, no database.
+
 Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 
 ---

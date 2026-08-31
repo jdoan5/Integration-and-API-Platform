@@ -210,6 +210,8 @@ before the upgrade.
 
 ## The public demo
 
+**Live:** <https://inventory-graphql-demo-ihnb3flw5a-uc.a.run.app/graphiql?path=/graphql>
+
 The whole stack needs PostgreSQL, a SOAP service, Redis, Kafka and a gateway
 before it answers anything. That is the right shape for the project and the
 wrong shape for a link someone clicks once, so there is a `demo` profile that

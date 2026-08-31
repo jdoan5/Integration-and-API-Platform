@@ -40,7 +40,15 @@ echo
 # --- the guard rails, all deliberate ---------------------------------------
 ARGS=(
     run deploy "$SERVICE"
+    # --source, not a locally built image: `docker build` on an Apple Silicon
+    # Mac produces an arm64 image and Cloud Run runs amd64, so a local build
+    # deploys and then fails to start with an exec-format error. Cloud Build
+    # sidesteps that by building on the target architecture.
     --source .
+    # Non-interactive: this accepts creating the cloud-run-source-deploy
+    # Artifact Registry repository on first run. Without it the command waits
+    # on a prompt that never arrives in CI or a background shell.
+    --quiet
     --project "$PROJECT"
     --region "$REGION"
     # A demo nobody can open is not a demo. There is no write path and no data
