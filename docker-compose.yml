@@ -159,5 +159,46 @@ services:
       timeout: 5s
       retries: 10
 
+  # --------------------------------------------------------------------------
+  # Temporal - durable workflow orchestration (Phase 8).
+  #
+  # Phase 4 is CHOREOGRAPHY: a movement emits an event and independent
+  # consumers react. Nobody is in charge, which is exactly right for reacting
+  # to something that already happened, and exactly wrong for a process that
+  # has to COMPLETE. This is the other half of that argument.
+  #
+  # `server start-dev` is one container with no external database, unlike the
+  # auto-setup image which wants Postgres or Cassandra. --db-filename is
+  # deliberate: the default is in-memory, and a workflow engine that forgets
+  # everything on restart cannot demonstrate the one property it exists for.
+  #
+  #   7233 = frontend gRPC (the SDK connects here)
+  #   8233 = Web UI
+  # --------------------------------------------------------------------------
+  temporal:
+    image: temporalio/temporal:latest
+    container_name: iap-temporal
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --db-filename
+      - /home/temporal/temporal.db
+      - --log-level
+      - warn
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal-data:/home/temporal
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
 volumes:
   redis-data:
+  temporal-data:

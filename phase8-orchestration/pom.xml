@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.1.1</version>
+		<relativePath/>
+	</parent>
+	<groupId>com.jdoan</groupId>
+	<artifactId>orchestration</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>orchestration</name>
+	<description>Durable replenishment saga on Temporal</description>
+
+	<properties>
+		<java.version>21</java.version>
+		<temporal.version>1.38.0</temporal.version>
+	</properties>
+
+	<dependencies>
+		<!-- The plain SDK, NOT temporal-spring-boot-starter-alpha.
+		     That starter is pinned to spring-boot-dependencies 2.7.12 - three
+		     major versions behind this repo - so its autoconfiguration would
+		     not load and it would drag an ancient Spring onto the classpath.
+		     The WorkflowClient and WorkerFactory beans are a dozen lines by
+		     hand; see TemporalConfig. -->
+		<dependency>
+			<groupId>io.temporal</groupId>
+			<artifactId>temporal-sdk</artifactId>
+			<version>${temporal.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.temporal</groupId>
+			<artifactId>temporal-opentracing</artifactId>
+			<version>${temporal.version}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-opentelemetry</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.temporal</groupId>
+			<artifactId>temporal-testing</artifactId>
+			<version>${temporal.version}</version>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+</project>
