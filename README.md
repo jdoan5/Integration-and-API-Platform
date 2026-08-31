@@ -234,6 +234,12 @@ about it:
 - **Kong's config validator crashed inside its own error reporter**, printing
   `attempt to concatenate local 'k'` and nothing about the plugin pointing at a
   service that did not exist.
+- **A cache that failed open where it had to fail closed** — with Redis down the
+  idempotency check read as "no prior call", so two identical mutations wrote
+  two movements. The Phase 2 cache bug, inside out.
+- **A depth limit that broke the schema browser** while the test suite stayed
+  green, because the suite's introspection check was shallower than the one
+  GraphiQL actually sends.
 
 Each is documented as a gotcha in the relevant phase README.
 

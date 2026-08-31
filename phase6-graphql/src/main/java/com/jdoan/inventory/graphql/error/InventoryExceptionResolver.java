@@ -1,5 +1,6 @@
 package com.jdoan.inventory.graphql.error;
 
+import com.jdoan.inventory.graphql.api.IdempotencyUnavailableException;
 import com.jdoan.inventory.graphql.soapclient.UpstreamFaultException;
 import graphql.GraphQLError;
 import graphql.schema.DataFetchingEnvironment;
@@ -36,6 +37,18 @@ public class InventoryExceptionResolver extends DataFetcherExceptionResolverAdap
                     .extensions(Map.of(
                             "code", fault.getCode(),
                             "field", fault.getField() == null ? "" : fault.getField()))
+                    .build();
+        }
+
+        if (ex instanceof IdempotencyUnavailableException) {
+            // Deliberately visible. The message tells the caller exactly what to
+            // do next, which is the whole point of a typed error.
+            return GraphQLError.newError()
+                    .errorType(ErrorType.BAD_REQUEST)
+                    .message(ex.getMessage())
+                    .path(env.getExecutionStepInfo().getPath())
+                    .location(env.getField().getSourceLocation())
+                    .extensions(Map.of("code", "IDEMPOTENCY_STORE_UNAVAILABLE"))
                     .build();
         }
 

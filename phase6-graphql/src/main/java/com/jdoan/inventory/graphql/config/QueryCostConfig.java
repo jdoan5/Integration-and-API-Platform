@@ -1,7 +1,5 @@
 package com.jdoan.inventory.graphql.config;
 
-import graphql.analysis.MaxQueryComplexityInstrumentation;
-import graphql.analysis.MaxQueryDepthInstrumentation;
 import graphql.execution.instrumentation.Instrumentation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -31,14 +29,14 @@ import org.springframework.context.annotation.Configuration;
 public class QueryCostConfig {
 
     /**
-     * Depth stops recursion. Product -> stockLevels is the only nesting the
+     * Depth stops recursion. Introspection is exempt - see IntrospectionAwareLimits. Product -> stockLevels is the only nesting the
      * schema allows today, so 10 is generous; the point is that it is bounded
      * at all, before someone adds a cyclic field and a client finds it.
      */
     @Bean
     public Instrumentation maxDepthInstrumentation(
             @Value("${inventory.graphql.max-depth:10}") int maxDepth) {
-        return new MaxQueryDepthInstrumentation(maxDepth);
+        return new IntrospectionAwareLimits.Depth(maxDepth);
     }
 
     /**
@@ -52,7 +50,7 @@ public class QueryCostConfig {
     public Instrumentation maxComplexityInstrumentation(
             @Value("${inventory.graphql.max-complexity:120}") int maxComplexity,
             @Value("${inventory.graphql.default-page-size:25}") int defaultPageSize) {
-        return new MaxQueryComplexityInstrumentation(
+        return new IntrospectionAwareLimits.Complexity(
                 maxComplexity, new ListAwareComplexityCalculator(defaultPageSize));
     }
 }

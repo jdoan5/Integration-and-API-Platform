@@ -100,7 +100,7 @@ public class InventoryService {
         // header convention to borrow.
         String idemKey = input.idempotencyKey();
         if (idemKey != null && !idemKey.isBlank()) {
-            String stored = cacheGet("gql:idem:" + idemKey);
+            String stored = idempotencyGet("gql:idem:" + idemKey);
             if (stored != null) {
                 try {
                     Types.MovementResult prior = json.readValue(stored, Types.MovementResult.class);
@@ -145,6 +145,42 @@ public class InventoryService {
                 return null;
             }
             throw fault;
+        }
+    }
+
+    /**
+     * The idempotency lookup, which must NOT swallow a Redis failure.
+     *
+     * FOUND WHEN DOCKER STOPPED MID-SESSION. Every other cache read here treats
+     * an unreachable Redis as a miss, which is right: the cache is an
+     * optimisation and a read should still succeed without it. Routing the
+     * idempotency check through that same helper made an unreachable Redis look
+     * like "no prior call", so two identical mutations wrote two movements -
+     * movementId 42, then 43 - while promising to be safe to retry.
+     *
+     * That is the Phase 2 cache bug turned inside out. There the cache became a
+     * hard dependency and reads failed; here it stayed soft where it must be
+     * hard, and writes duplicated silently. Failing open is correct for reads
+     * and dangerous for writes, and the two paths need different code.
+     *
+     * So this one fails CLOSED: a caller who supplied an idempotency key asked
+     * for a guarantee, and refusing is the honest answer when it cannot be
+     * given. A caller who supplied no key never asked, and is unaffected.
+     */
+    private String idempotencyGet(String key) {
+        if (!cacheEnabled) {
+            throw new IdempotencyUnavailableException(
+                    "An idempotencyKey was supplied but the idempotency store is disabled, "
+                    + "so a retry cannot be made safe. Retry without the key to accept that "
+                    + "risk, or enable the cache.");
+        }
+        try {
+            return redis.opsForValue().get(key);
+        } catch (Exception e) {
+            throw new IdempotencyUnavailableException(
+                    "An idempotencyKey was supplied but the idempotency store is unreachable, "
+                    + "so this mutation cannot be made safe to retry. Refusing rather than "
+                    + "risking a duplicate movement.", e);
         }
     }
 

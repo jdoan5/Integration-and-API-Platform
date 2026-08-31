@@ -120,6 +120,27 @@ That is the same argument the XSD made in Phase 1, in a fifth protocol.
 
 ## Gotchas found building this
 
+- **The depth limit broke the schema browser, and the tests stayed green.**
+  GraphiQL's first act is the full introspection query — 15 levels deep — so a
+  depth limit of 10 rejected it and the UI loaded with no docs panel and no
+  autocomplete. The suite's own introspection check was shallow enough to pass,
+  which is the worst possible combination: a green suite and a broken
+  developer-facing surface. Raising the limit past 15 would have "fixed" it and
+  gutted the protection. Introspection is one fixed query whose cost is a
+  property of the schema rather than the caller, so it is exempted
+  ([`IntrospectionAwareLimits`](src/main/java/com/jdoan/inventory/graphql/config/IntrospectionAwareLimits.java))
+  and the suite now sends the real thing. In production you turn introspection
+  off entirely rather than making a depth limit do that job.
+- **The cache failed open where it had to fail closed.** Docker stopped
+  mid-session and Redis went with it. Reads carried on correctly — the cache is
+  an optimisation. But the idempotency lookup used the same helper, so an
+  unreachable Redis looked like "no prior call" and two identical mutations
+  wrote two movements (`movementId` 42, then 43) while promising to be safe to
+  retry. That is the Phase 2 cache bug inside out: there it became a hard
+  dependency and reads broke; here it stayed soft where it must be hard and
+  writes duplicated in silence. Failing open is right for reads and dangerous
+  for writes, and the two paths now use different code — a caller who supplies
+  an `idempotencyKey` gets a refusal rather than a duplicate.
 - **Spring Boot 4 ships Jackson 3, and Jackson 3 moved its root package.**
   `com.fasterxml.jackson.databind` → `tools.jackson.databind`, and
   `JacksonException` is now **unchecked**. Every Jackson snippet written before
@@ -200,7 +221,8 @@ before the upgrade.
 JAVA_HOME=$(/usr/libexec/java_home -v 21) ./mvnw test
 ```
 
-9 unit tests covering the warehouse-code round trip and the complexity scoring —
+11 unit tests covering the warehouse-code round trip, the complexity scoring, and
+the idempotency store failing closed —
 including that a `[Type!]!` is still recognised as a list, which is the mistake
 that would make every list score as a scalar and quietly disable the limit.
 

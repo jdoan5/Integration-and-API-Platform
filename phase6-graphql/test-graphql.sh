@@ -60,6 +60,17 @@ TYPES=$(gql '{ __schema { queryType { name } mutationType { name } } }')
 [ "$(jpath "$TYPES" 'd["data"]["__schema"]["queryType"]["name"]')" = "Query" ] \
     && pass "schema introspects" || fail "introspection failed"
 
+# The FULL introspection query, which is what GraphiQL actually sends. The
+# shallow one above passed while the schema browser was broken by the depth
+# limit, so asserting the real thing is the only version that means anything.
+FULL_INTROSPECTION='query IntrospectionQuery { __schema { queryType { name } types { ...FullType } } } fragment FullType on __Type { kind name fields(includeDeprecated:true) { name args { ...InputValue } type { ...TypeRef } isDeprecated } inputFields { ...InputValue } interfaces { ...TypeRef } enumValues(includeDeprecated:true) { name } possibleTypes { ...TypeRef } } fragment InputValue on __InputValue { name type { ...TypeRef } defaultValue } fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } } }'
+DEEP=$(gql "$FULL_INTROSPECTION")
+[ "$(printf '%s' "$DEEP" | has_errors)" = "no" ] \
+    && pass "the full introspection query is not blocked by the query limits" \
+    || fail "introspection is blocked: $(jpath "$DEEP" 'd["errors"][0]["message"][:60]')"
+echo "  It is 15 levels deep. A depth limit of 10 rejected it and GraphiQL"
+echo "  loaded with no docs and no autocomplete - green suite, broken UI."
+
 DEPRECATED=$(gql '{ __type(name:"LowStockItem") { fields(includeDeprecated:true) { name isDeprecated } } }')
 [ "$(jpath "$DEPRECATED" 'sum(1 for f in d["data"]["__type"]["fields"] if f["isDeprecated"])')" = "1" ] \
     && pass "suggestedOrderQty is published as deprecated, and still served" \
