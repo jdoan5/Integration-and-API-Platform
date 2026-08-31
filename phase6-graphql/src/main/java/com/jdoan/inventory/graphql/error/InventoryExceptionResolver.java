@@ -1,5 +1,6 @@
 package com.jdoan.inventory.graphql.error;
 
+import com.jdoan.inventory.graphql.api.DemoReadOnlyException;
 import com.jdoan.inventory.graphql.api.IdempotencyUnavailableException;
 import com.jdoan.inventory.graphql.soapclient.UpstreamFaultException;
 import graphql.GraphQLError;
@@ -37,6 +38,16 @@ public class InventoryExceptionResolver extends DataFetcherExceptionResolverAdap
                     .extensions(Map.of(
                             "code", fault.getCode(),
                             "field", fault.getField() == null ? "" : fault.getField()))
+                    .build();
+        }
+
+        if (ex instanceof DemoReadOnlyException) {
+            return GraphQLError.newError()
+                    .errorType(ErrorType.BAD_REQUEST)
+                    .message(ex.getMessage())
+                    .path(env.getExecutionStepInfo().getPath())
+                    .location(env.getField().getSourceLocation())
+                    .extensions(Map.of("code", "DEMO_READ_ONLY"))
                     .build();
         }
 

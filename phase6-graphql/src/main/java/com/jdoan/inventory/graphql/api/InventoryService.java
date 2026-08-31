@@ -1,10 +1,5 @@
 package com.jdoan.inventory.graphql.api;
 
-import com.jdoan.inventory.graphql.soapclient.InventorySoapClient;
-import com.jdoan.inventory.graphql.soapclient.UpstreamFaultException;
-import com.jdoan.inventory.graphql.soapclient.generated.ListLowStockResponse;
-import com.jdoan.inventory.graphql.soapclient.generated.ProductType;
-import com.jdoan.inventory.graphql.soapclient.generated.RecordStockMovementResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -12,10 +7,9 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Maps the SOAP backend onto the GraphQL types, and caches what it can.
+ * Caching and idempotency over whichever {@link InventoryBackend} is bound.
  *
  * THE CACHING LESSON LIVES HERE. Phase 2 cached whole HTTP responses under the
  * request URL, because in REST the URL IS the cache key: /products/ELEC-LAP-001
@@ -28,20 +22,24 @@ import java.util.Map;
  * identity, and let each query assemble whatever shape it asked for. The TTLs
  * are Phase 2's, but the key is the SKU rather than the URL - and that is the
  * whole difference.
+ *
+ * The JAXB mapping that used to live here moved to SoapInventoryBackend when
+ * the public demo needed a second implementation. Everything in this class is
+ * indifferent to which one it is talking to.
  */
 @Service
 public class InventoryService {
 
     private static final Duration PRODUCT_TTL = Duration.ofMinutes(5);
 
-    private final InventorySoapClient soap;
+    private final InventoryBackend backend;
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final boolean cacheEnabled;
 
-    public InventoryService(InventorySoapClient soap, StringRedisTemplate redis, ObjectMapper json,
+    public InventoryService(InventoryBackend backend, StringRedisTemplate redis, ObjectMapper json,
                             @Value("${inventory.graphql.cache.enabled:true}") boolean cacheEnabled) {
-        this.soap = soap;
+        this.backend = backend;
         this.redis = redis;
         this.json = json;
         this.cacheEnabled = cacheEnabled;
@@ -60,13 +58,7 @@ public class InventoryService {
             }
         }
 
-        Types.Product product = translateFaults(() -> {
-            ProductType p = soap.getProduct(sku);
-            return new Types.Product(p.getSku(), p.getName(), p.getDescription(), p.getCategory(),
-                    p.getUnitPrice().doubleValue(), p.getUnitCost().doubleValue(),
-                    p.getReorderPoint(), p.getReorderQuantity(), p.isActive());
-        });
-
+        Types.Product product = backend.getProduct(sku);
         if (product != null) {
             cachePut(key, product, PRODUCT_TTL);
         }
@@ -74,24 +66,11 @@ public class InventoryService {
     }
 
     public List<Types.StockLevel> getStockLevels(String sku, String warehouseCode) {
-        return translateFaults(() -> soap.getStockLevels(sku, warehouseCode).stream()
-                .map(s -> new Types.StockLevel(
-                        s.getSku(), s.getProductName(),
-                        WarehouseCodes.toGraphql(s.getWarehouseCode()), s.getWarehouseName(),
-                        s.getQuantity(), s.getReorderPoint(),
-                        s.getQuantity() < s.getReorderPoint()))
-                .toList());
+        return backend.getStockLevels(sku, warehouseCode);
     }
 
     public List<Types.LowStockItem> listLowStock(String warehouseCode, Integer limit) {
-        ListLowStockResponse response = soap.listLowStock(warehouseCode, limit);
-        return response.getItem().stream()
-                .map(i -> new Types.LowStockItem(
-                        i.getSku(), i.getProductName(),
-                        WarehouseCodes.toGraphql(i.getWarehouseCode()),
-                        i.getQuantity(), i.getReorderPoint(),
-                        i.getDeficit(), i.getSuggestedOrderQty()))
-                .toList();
+        return backend.listLowStock(warehouseCode, limit);
     }
 
     public Types.MovementResult recordMovement(Types.MovementInput input) {
@@ -113,20 +92,8 @@ public class InventoryService {
             }
         }
 
-        String domainWarehouse = WarehouseCodes.toDomain(input.warehouseCode());
-        RecordStockMovementResponse response = translateFaults(() ->
-                soap.recordMovement(input.sku(), domainWarehouse, input.movementType(),
-                        input.quantity(), input.referenceType(), input.notes()));
+        Types.MovementResult result = backend.recordMovement(input);
 
-        Types.MovementResult result = new Types.MovementResult(
-                String.valueOf(response.getMovementId()), response.getSku(),
-                WarehouseCodes.toGraphql(response.getWarehouseCode()),
-                response.getQuantityBefore(), response.getQuantityAfter(),
-                response.getQuantityAfter() - response.getQuantityBefore(),
-                String.valueOf(response.getRecordedAt()), false);
-
-        // The write makes the cached product stale only if reorder policy changed,
-        // but stock is not cached here at all - see the class comment.
         if (idemKey != null && !idemKey.isBlank()) {
             cachePut("gql:idem:" + idemKey, result, Duration.ofHours(24));
         }
@@ -134,20 +101,6 @@ public class InventoryService {
     }
 
     // ------------------------------------------------------------------
-    private <T> T translateFaults(java.util.function.Supplier<T> call) {
-        try {
-            return call.get();
-        } catch (UpstreamFaultException fault) {
-            if (fault.getCode().endsWith("NOT_FOUND")) {
-                // Absence is not an error in GraphQL: the field is nullable and
-                // null is the answer. Throwing here would fail sibling fields
-                // that resolved perfectly well.
-                return null;
-            }
-            throw fault;
-        }
-    }
-
     /**
      * The idempotency lookup, which must NOT swallow a Redis failure.
      *
@@ -203,6 +156,7 @@ public class InventoryService {
     }
 
     public long clearCache() {
+        if (!cacheEnabled) return 0;
         try {
             var keys = redis.keys("gql:*");
             if (keys == null || keys.isEmpty()) return 0;

@@ -1,9 +1,9 @@
 package com.jdoan.inventory.graphql;
 
 import com.jdoan.inventory.graphql.api.IdempotencyUnavailableException;
+import com.jdoan.inventory.graphql.api.InventoryBackend;
 import com.jdoan.inventory.graphql.api.InventoryService;
 import com.jdoan.inventory.graphql.api.Types;
-import com.jdoan.inventory.graphql.soapclient.InventorySoapClient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,10 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class IdempotencyFailsClosedTest {
 
     private InventoryService serviceWithNoStore() {
-        // Nothing is called before the idempotency check, so the collaborators
-        // can be null - if that ever stops being true this test will say so
-        // loudly rather than passing for the wrong reason.
-        return new InventoryService((InventorySoapClient) null, null, null, false);
+        // Nothing is called before the idempotency check, so the backend and the
+        // redis template can be null - if that ever stops being true this test
+        // will say so loudly rather than passing for the wrong reason.
+        return new InventoryService((InventoryBackend) null, null, null, false);
     }
 
     private Types.MovementInput input(String idempotencyKey) {

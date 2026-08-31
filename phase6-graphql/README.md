@@ -208,6 +208,48 @@ return `null` is a runtime error waiting for the right data — this reports it 
 startup instead, and it is the check most likely to light up on a schema written
 before the upgrade.
 
+## The public demo
+
+The whole stack needs PostgreSQL, a SOAP service, Redis, Kafka and a gateway
+before it answers anything. That is the right shape for the project and the
+wrong shape for a link someone clicks once, so there is a `demo` profile that
+runs this facade alone:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=demo
+```
+
+```bash
+docker build -t inventory-graphql-demo . && docker run --rm -p 8080:8080 inventory-graphql-demo
+```
+
+```bash
+./deploy-demo.sh --dry-run     # then without the flag to publish to Cloud Run
+```
+
+One container, ~6 second cold start, scale-to-zero.
+[`DemoInventoryBackend`](src/main/java/com/jdoan/inventory/graphql/api/DemoInventoryBackend.java)
+serves a snapshot exported from the real database instead of calling SOAP.
+
+**What stays real, because a demo that blurs this is worse than no demo:**
+
+| | |
+|---|---|
+| The schema | The same `.graphqls`, resolvers, and query validation |
+| Cost analysis | The same instrumentation — the expensive query still scores **2701** and is still refused |
+| The N+1 | The demo backend calls the same counter, so `lowStock { product { … } }` still measures **1 vs 7** |
+| The data | A snapshot of `inventory_mgmt` — 15 products, 45 stock rows, 3 warehouses |
+| The write | **Refused**, with a typed `DEMO_READ_ONLY` error |
+
+The mutation is deliberately left *in the schema*. Hiding it would misrepresent
+the contract; refusing it at runtime with an explanation is the honest version.
+
+This is also why [`InventoryBackend`](src/main/java/com/jdoan/inventory/graphql/api/InventoryBackend.java)
+exists at all. Until the demo there was one backend and an interface would have
+been abstraction for its own sake. The seam is expressed in the GraphQL types
+rather than the JAXB ones, so the fixture implementation has never heard of
+SOAP — which is what keeps it a second implementation rather than a mock.
+
 ## Configuration
 
 | Variable | Default | Purpose |
