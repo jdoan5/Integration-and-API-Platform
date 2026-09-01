@@ -20,12 +20,19 @@
 	</properties>
 
 	<dependencies>
-		<!-- The plain SDK, NOT temporal-spring-boot-starter-alpha.
-		     That starter is pinned to spring-boot-dependencies 2.7.12 - three
-		     major versions behind this repo - so its autoconfiguration would
-		     not load and it would drag an ancient Spring onto the classpath.
-		     The WorkflowClient and WorkerFactory beans are a dozen lines by
-		     hand; see TemporalConfig. -->
+		<!-- The plain SDK, with the client and worker wired by hand in
+		     TemporalConfig.
+
+		     There IS a working Spring starter - io.temporal:temporal-spring-boot-starter
+		     at 1.38.0, which supports Boot 4. (Do not confuse it with
+		     temporal-spring-boot-starter-alpha: the -alpha suffix was dropped
+		     at 1.24.0 and that artifact has been frozen since April 2024.)
+
+		     Choosing the plain SDK here is a preference, not a necessity: the
+		     wiring is about thirty lines, it has no version-skew risk against
+		     Boot 4, and it keeps the moving parts visible - a stub, a client,
+		     and a worker polling one queue. The starter would be the right call
+		     in a project with many workers to auto-discover. -->
 		<dependency>
 			<groupId>io.temporal</groupId>
 			<artifactId>temporal-sdk</artifactId>

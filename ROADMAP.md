@@ -285,6 +285,39 @@ count, and only the waterfall showed that six "parallel" calls were sequential.
 
 ---
 
+## Phase 8 — Durable orchestration ✅ *built*
+
+**Directory:** `phase8-orchestration/`
+**Skills:** Temporal, sagas, compensation, durable timers and signals
+
+| Concept | Where it lives |
+|---|---|
+| The saga | `StockTransferWorkflowImpl` — compensations registered inline |
+| Durable human approval | `Workflow.await(APPROVAL_WINDOW, ...)` + `@SignalMethod` |
+| "Where is it now" | `@QueryMethod` — the thing choreography cannot answer |
+| Retries meeting idempotency | activity keys derived from workflow id + step |
+| Deterministic failure injection | `simulate: "carrier-unavailable"` |
+| Hand-wired client | `TemporalConfig` — a preference over the (working) Spring starter |
+
+**The lesson that matters:** choreography and orchestration are not competing
+answers to one question, they are answers to two. Phase 4 asks how parts react
+to each other and gets maximum decoupling; Phase 8 asks who is responsible for
+finishing and gets an owner, explicit state, and compensation written down. The
+cost is real — the workflow knows every step, which is exactly what Phase 4
+spent effort avoiding.
+
+**Exercises to go further**
+1. **Kill the worker mid-transfer** and restart it. The workflow resumes with
+   its local variables intact; nothing was persisted by hand.
+2. **Let the approval time out.** The transfer unwinds on a timer that lives in
+   Temporal rather than in a scheduler you have to run.
+3. **Give the orchestrator its own Kong consumer** with a quota sized for a
+   machine, and note why 20/minute was never meant for it.
+4. **Add a second compensation** — reserve carrier capacity before shipping —
+   and watch them unwind in reverse order.
+
+---
+
 ## Suggested pace
 
 | Phase | Effort | Ship when |
@@ -296,6 +329,7 @@ count, and only the waterfall showed that six "parallel" calls were sequential.
 | 5 — MCP + agent | 1–2 weeks | Tools callable from Claude Code, write gated by approval |
 | 6 — GraphQL | 1–2 weeks | N+1 measured, an over-budget query refused at zero cost |
 | 7 — Tracing | 1 week | One trace spans gateway → GraphQL → SOAP → Postgres |
+| 8 — Orchestration | 1–2 weeks | A transfer compensates on rejection, timeout and failure |
 
 Commit at the end of each phase with a README showing how to run it. A reviewer
 should be able to `docker compose up` and hit a working endpoint in under five

@@ -284,16 +284,47 @@ claim of parallelism, and it needs no caption to read.
 
 ---
 
-## If you only capture six
+## Stage 8 — Durable Orchestration
+
+Needs Temporal on :7233, the orchestration service on :8087, and the Phase 1/2
+services behind Kong.
+
+| File | What to capture |
+|---|---|
+| `01_The Saga Compensating.png` | The suite — 11 PASS across approval, rejection and failure |
+| `02_In Transit, In Neither Warehouse.png` | **The strongest shot** — the state no event represents |
+
+```bash
+# 01 — all three unwind paths, against real stock
+./phase8-orchestration/test-orchestration.sh
+```
+
+```bash
+# 02 — start a transfer, then ask where it is BEFORE approving
+WID=$(curl -s -X POST localhost:8087/transfers -H 'Content-Type: application/json' -d '{"sku":"ELEC-LAP-001","fromWarehouse":"WH-WEST","toWarehouse":"WH-EAST","quantity":2,"simulate":""}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["workflowId"])') && sleep 4 && curl -s localhost:8087/transfers/$WID | python3 -m json.tool && curl -s localhost:8082/api/v1/stock/ELEC-LAP-001 | python3 -m json.tool
+```
+
+**Shot 02 is the one to get right.** Put the query and the stock levels in one
+frame: the workflow says `AWAITING_APPROVAL`, and the units it carries are
+missing from both warehouses. That single image is the argument of the phase —
+choreography has no event for a gap.
+
+The Temporal UI at <http://localhost:8233> also shows the history and the
+compensating activities, and is worth a shot if you want the engine's own view.
+
+---
+
+## If you only capture seven
 
 1. `Stage 7/02_The N Plus One As A Waterfall.png`
-2. `Stage 4/01_Schema Evolution Rules.png`
-3. `Stage 5/03_Human Approval Before A Write.png`
-4. `Stage 3/01_Gateway Test Suite Passing.png`
-5. `Stage 1/04_Schema Validation Fault.png`
-6. `Stage 2/03_Cache Invalidation On Write.png`
+2. `Stage 8/02_In Transit, In Neither Warehouse.png`
+3. `Stage 4/01_Schema Evolution Rules.png`
+4. `Stage 5/03_Human Approval Before A Write.png`
+5. `Stage 3/01_Gateway Test Suite Passing.png`
+6. `Stage 1/04_Schema Validation Fault.png`
+7. `Stage 2/03_Cache Invalidation On Write.png`
 
-Those six cover every technology in the project, and each one shows a
+Those seven cover every technology in the project, and each one shows a
 **result** rather than source code. Screenshots of an IDE prove you have an IDE;
 screenshots of passing assertions prove the system works.
 

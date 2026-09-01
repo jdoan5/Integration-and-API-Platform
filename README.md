@@ -6,7 +6,7 @@ streaming with schema governance — all over a real PostgreSQL inventory domain
 
 **Skills:** SOAP · XML Schema (XSD) · service contracts & versioning · Redis ·
 Kong API Gateway · Kafka · Avro · Schema Registry · transactional outbox · CQRS ·
-MCP · LangGraph · Azure OpenAI · GraphQL · OpenTelemetry
+MCP · LangGraph · Azure OpenAI · GraphQL · OpenTelemetry · Temporal
 
 ---
 
@@ -56,6 +56,7 @@ relay → Kafka → consumers → read model.**
 | [5 — MCP & agent](phase5-mcp-agent/) | MCP, LangGraph, Azure OpenAI | ✅ Working |
 | [6 — GraphQL](phase6-graphql/) | GraphQL, query cost analysis, batching | ✅ Working |
 | [7 — Tracing](phase7-observability/) | OpenTelemetry, Jaeger, context propagation | ✅ Working |
+| [8 — Orchestration](phase8-orchestration/) | Temporal, sagas, compensation, durable signals | ✅ Working |
 
 **Try the GraphQL layer without installing anything:** [live GraphiQL](https://inventory-graphql-demo-ihnb3flw5a-uc.a.run.app/graphiql?path=/graphql) — a read-only build of Phase 6 with a
 snapshot of the inventory data. Same schema, same cost analysis, no database.
@@ -108,6 +109,8 @@ Verify the whole chain:
 | 8084 | MCP server (streamable HTTP) |
 | 8086 | GraphQL facade |
 | 16686 / 4318 | Jaeger UI / OTLP ingest |
+| 8087 | Orchestration service |
+| 7233 / 8233 | Temporal gRPC / Web UI |
 | 9092 / 8085 | Kafka / Schema Registry |
 | 6379 / 5432 | Redis / PostgreSQL |
 
@@ -208,6 +211,23 @@ softened.
 
 A counter can only confirm what you thought to count.
 
+### [8 — Durable orchestration](phase8-orchestration/)
+
+A stock-transfer saga on **Temporal**, and the deliberate counterpart to Phase
+4. Choreography answered *how do parts of this system react to each other*;
+this answers *who is responsible for finishing*.
+
+The demo is a query. Start a transfer and ask where it is: the goods have left
+`WH-WEST` and not arrived at `WH-EAST` — they are in **neither warehouse**.
+Phase 4 has no event for that and could not have one, because *in transit* is
+the gap between two events rather than one of them.
+
+Failure is the interesting half. A rejection, a timed-out approval and an
+unavailable carrier all unwind the same way, because each compensation is
+registered immediately after the step it undoes. And Temporal does not make
+retries safe — it makes them **certain**, which is why every activity carries
+the same `Idempotency-Key` the Phase 2 facade has accepted since Phase 2.
+
 ---
 
 ## What this project is really about
@@ -267,6 +287,12 @@ about it:
 - **A tracing exporter configured with a property Boot 4 ignores.** Boot 3's
   name produces no warning and no traces — everything starts cleanly and the
   data simply is not there.
+- **A verification suite that competed with the system for its own rate
+  limit.** The Phase 8 tests polled stock through Kong while the workflow's
+  activities called through it too; together they exceeded 20/minute, the
+  activities got `429`, and every transfer compensated. Correct behaviour,
+  meaningless test — an observer must not spend the quota of the thing it
+  observes.
 - **A hand-built Spring bean silently ignored the property meant to configure
   it** — Kafka consumer spans were missing with nothing reporting a problem,
   because the observation flag only reaches the factory Boot auto-configures.
