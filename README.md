@@ -70,6 +70,30 @@ Full plan and exercises: **[ROADMAP.md](ROADMAP.md)**
 **Prerequisites:** Java 21, Docker, and PostgreSQL with the `inventory_mgmt`
 database from the [companion SQL project](https://github.com/jdoan5/Databases-and-Data-Platforms).
 
+### The short way
+
+```bash
+./run-platform.sh
+```
+
+Brings up the six containers and the five JVM services in dependency order,
+waits for each to answer, and prints what is listening where. `status`, `stop`,
+`stop --all` and `logs <service>` do what they sound like.
+
+### Opening it in an IDE
+
+The root `pom.xml` is an **aggregator**: open the repository once in IntelliJ
+IDEA and it finds all five Java services. It is not a parent — every module
+still declares `spring-boot-starter-parent` itself and stays independently
+buildable, which is how the phase READMEs run them and how Phase 6 deploys.
+
+Phase 5 is Python and has its own virtualenv (`phase5-mcp-agent/.venv`), so it
+wants PyCharm or IDEA's Python plugin pointed at that interpreter. Phase 3 is a
+Kong YAML file and Phase 7 is configuration inside the other modules — neither
+needs an IDE.
+
+### The long way, one phase at a time
+
 ```bash
 docker compose up -d redis kong kafka schema-registry
 ```

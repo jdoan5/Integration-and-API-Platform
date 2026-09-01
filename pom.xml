@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<!-- ========================================================================
+	     An AGGREGATOR only. It exists so IntelliJ IDEA opens the repository once
+	     and finds all five Java services, instead of importing each pom by hand.
+
+	     Deliberately NOT a parent: every module still declares
+	     spring-boot-starter-parent as its own parent and manages its own
+	     dependencies. A module must stay independently buildable, because that
+	     is how the phase READMEs tell you to run them and how they are deployed.
+	     Listing a module here changes nothing about building it alone.
+
+	     Phase 3 (Kong config), Phase 5 (Python) and Phase 7 (configuration
+	     inside the other modules) have no Java to aggregate.
+	     ==================================================================== -->
+	<groupId>com.jdoan</groupId>
+	<artifactId>integration-api-platform</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<packaging>pom</packaging>
+	<name>Integration &amp; API Platform</name>
+	<description>Aggregator for the Java services in phases 1, 2, 4, 6 and 8</description>
+
+	<modules>
+		<module>phase1-soap-service</module>
+		<module>phase2-rest-facade</module>
+		<module>phase4-events/app</module>
+		<module>phase6-graphql</module>
+		<module>phase8-orchestration</module>
+	</modules>
+</project>
